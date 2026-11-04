@@ -9,11 +9,14 @@ class ScheduleService extends ChangeNotifier {
   static final ScheduleService instance = ScheduleService._internal();
   ScheduleService._internal();
 
-  WeeklySchedule weeklySchedule = WeeklySchedule.createDefault();
+  final Map<String, WeeklySchedule> _personSchedules = {};
+  WeeklySchedule _sharedSchedule = WeeklySchedule.createDefault();
   List<Person> persons = [];
   String? activePersonId; // null = View All / Shared
 
-  static const String _scheduleStorageKey = 'daily_schedule_weekly';
+  static const String _personSchedulePrefix = 'daily_schedule_person_';
+  static const String _sharedScheduleKey = 'daily_schedule_shared';
+  static const String _legacyScheduleStorageKey = 'daily_schedule_weekly';
   static const String _personsStorageKey = 'daily_schedule_persons';
   static const String _activePersonKey = 'daily_schedule_active_person_id';
 
@@ -34,6 +37,20 @@ class ScheduleService extends ChangeNotifier {
       return null;
     }
   }
+
+  /// Returns the individual 7-day schedule for the requested person
+  WeeklySchedule getScheduleForPerson(String? personId) {
+    if (personId == null || personId.isEmpty) {
+      return _sharedSchedule;
+    }
+    if (!_personSchedules.containsKey(personId)) {
+      _personSchedules[personId] = _createInitialScheduleForPerson(personId);
+    }
+    return _personSchedules[personId]!;
+  }
+
+  /// Shortcut to the active person's weekly schedule
+  WeeklySchedule get weeklySchedule => getScheduleForPerson(activePersonId);
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -58,27 +75,93 @@ class ScheduleService extends ChangeNotifier {
       activePersonId = null;
     }
 
-    // 3. Load Weekly Schedule
-    final scheduleJson = prefs.getString(_scheduleStorageKey);
-    if (scheduleJson != null && scheduleJson.isNotEmpty) {
+    // 3. Load Shared Schedule
+    final sharedJson = prefs.getString(_sharedScheduleKey);
+    if (sharedJson != null && sharedJson.isNotEmpty) {
       try {
-        final Map<String, dynamic> decoded = jsonDecode(scheduleJson);
-        weeklySchedule = WeeklySchedule.fromJson(decoded);
+        _sharedSchedule = WeeklySchedule.fromJson(jsonDecode(sharedJson));
       } catch (_) {
-        weeklySchedule = _createInitialDefaultSchedule();
+        _sharedSchedule = WeeklySchedule.createDefault();
       }
     } else {
-      weeklySchedule = _createInitialDefaultSchedule();
-      await saveSchedule();
+      _sharedSchedule = WeeklySchedule.createDefault();
+    }
+
+    // 4. Load or Migrate Individual Schedules for each person
+    final legacyScheduleJson = prefs.getString(_legacyScheduleStorageKey);
+    WeeklySchedule? legacyWeekly;
+    if (legacyScheduleJson != null && legacyScheduleJson.isNotEmpty) {
+      try {
+        legacyWeekly = WeeklySchedule.fromJson(jsonDecode(legacyScheduleJson));
+      } catch (_) {}
+    }
+
+    for (final person in persons) {
+      final personScheduleJson = prefs.getString('$_personSchedulePrefix${person.id}');
+      if (personScheduleJson != null && personScheduleJson.isNotEmpty) {
+        try {
+          _personSchedules[person.id] = WeeklySchedule.fromJson(jsonDecode(personScheduleJson));
+        } catch (_) {
+          _personSchedules[person.id] = _createInitialScheduleForPerson(person.id);
+          await savePersonSchedule(person.id);
+        }
+      } else {
+        // Migrate from legacy single schedule if items were assigned to this person
+        if (legacyWeekly != null) {
+          final migratedSchedule = WeeklySchedule.createDefault();
+          bool foundItems = false;
+          for (int day = 0; day < 7; day++) {
+            final dayItems = legacyWeekly
+                .getDay(day)
+                .items
+                .where((item) => item.assignedPersonId == person.id)
+                .map((e) => e.copyWith())
+                .toList();
+            if (dayItems.isNotEmpty) {
+              foundItems = true;
+              migratedSchedule.days[day] = DaySchedule(dayOfWeek: day, items: dayItems);
+            }
+          }
+          if (foundItems) {
+            _personSchedules[person.id] = migratedSchedule;
+          } else {
+            _personSchedules[person.id] = _createInitialScheduleForPerson(person.id);
+          }
+        } else {
+          _personSchedules[person.id] = _createInitialScheduleForPerson(person.id);
+        }
+        await savePersonSchedule(person.id);
+      }
     }
 
     notifyListeners();
   }
 
-  Future<void> saveSchedule() async {
+  /// Persists the individual schedule for a specific person
+  Future<void> savePersonSchedule(String? personId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_scheduleStorageKey, jsonEncode(weeklySchedule.toJson()));
+    if (personId == null || personId.isEmpty) {
+      await prefs.setString(_sharedScheduleKey, jsonEncode(_sharedSchedule.toJson()));
+    } else {
+      final schedule = getScheduleForPerson(personId);
+      await prefs.setString('$_personSchedulePrefix$personId', jsonEncode(schedule.toJson()));
+    }
     notifyListeners();
+  }
+
+  /// Saves activities for a specific day for a specific person
+  Future<void> savePersonDaySchedule(String? personId, int dayOfWeek, List<ScheduleItem> items) async {
+    final schedule = getScheduleForPerson(personId);
+    schedule.days[dayOfWeek] = DaySchedule(
+      dayOfWeek: dayOfWeek,
+      items: items.map((e) => e.copyWith(assignedPersonId: personId)).toList(),
+    );
+    await savePersonSchedule(personId);
+  }
+
+  /// Saves the active person's schedule
+  Future<void> saveSchedule() async {
+    await savePersonSchedule(activePersonId);
   }
 
   Future<void> savePersons() async {
@@ -100,7 +183,9 @@ class ScheduleService extends ChangeNotifier {
 
   Future<void> addPerson(Person person) async {
     persons.add(person);
+    _personSchedules[person.id] = _createInitialScheduleForPerson(person.id);
     await savePersons();
+    await savePersonSchedule(person.id);
   }
 
   Future<void> updatePerson(Person person) async {
@@ -113,25 +198,17 @@ class ScheduleService extends ChangeNotifier {
 
   Future<void> deletePerson(String personId) async {
     persons.removeWhere((p) => p.id == personId);
+    _personSchedules.remove(personId);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_personSchedulePrefix$personId');
     if (activePersonId == personId) {
       activePersonId = null;
     }
-
-    // Unassign activities that were assigned to this deleted person
-    for (int day = 0; day <= 6; day++) {
-      final daySchedule = weeklySchedule.getDay(day);
-      for (var item in daySchedule.items) {
-        if (item.assignedPersonId == personId) {
-          item.assignedPersonId = null;
-        }
-      }
-    }
-
     await savePersons();
-    await saveSchedule();
+    notifyListeners();
   }
 
-  /// Filter items by the currently active person or a specific person
+  /// Filter items by person ID
   List<ScheduleItem> filterItems(
     List<ScheduleItem> items, {
     String? personId,
@@ -139,136 +216,140 @@ class ScheduleService extends ChangeNotifier {
   }) {
     final targetId = personId ?? activePersonId;
     if (targetId == null) {
-      // Return all items if view is set to All / Shared
       return items;
-    }
-    if (includeShared) {
-      return items
-          .where((item) =>
-              item.assignedPersonId == targetId ||
-              item.assignedPersonId == null ||
-              item.assignedPersonId!.isEmpty)
-          .toList();
     }
     return items.where((item) => item.assignedPersonId == targetId).toList();
   }
 
-  /// Count completed and total items for a day considering the active person filter
-  ({int completed, int total}) getDayProgress(
-    int dayIndex, {
-    String? personId,
-    bool includeShared = true,
-  }) {
-    final dayItems = filterItems(
-      weeklySchedule.getDay(dayIndex).items,
-      personId: personId,
-      includeShared: includeShared,
-    );
+  /// Count completed and total items for a day considering the specified person
+  ({int completed, int total}) getDayProgress(int dayIndex, {String? personId}) {
+    final targetId = personId ?? activePersonId;
+    final schedule = getScheduleForPerson(targetId);
+    final dayItems = schedule.getDay(dayIndex).items;
     final completedCount = dayItems.where((i) => i.isCompleted).length;
     return (completed: completedCount, total: dayItems.length);
   }
 
-  /// Clones a day's schedule to another target day
-  Future<void> copyDay(int fromDay, int toDay) async {
-    final sourceDay = weeklySchedule.getDay(fromDay);
+  /// Clones a day's schedule to another target day for a specific person
+  Future<void> copyDay(int fromDay, int toDay, {String? personId}) async {
+    final targetId = personId ?? activePersonId;
+    final schedule = getScheduleForPerson(targetId);
+    final sourceDay = schedule.getDay(fromDay);
     final clonedItems = sourceDay.items.map((e) => e.copyWith(
       id: '${DateTime.now().millisecondsSinceEpoch}_${Random().nextInt(9999)}',
       isCompleted: false, // Reset completion status
+      assignedPersonId: targetId,
     )).toList();
 
-    weeklySchedule.days[toDay] = DaySchedule(dayOfWeek: toDay, items: clonedItems);
-    await saveSchedule();
+    schedule.days[toDay] = DaySchedule(dayOfWeek: toDay, items: clonedItems);
+    await savePersonSchedule(targetId);
   }
 
-  /// Clones active day to all weekdays (Mon-Fri = 1..5)
-  Future<void> copyDayToAllWeekdays(int fromDay) async {
+  /// Clones active day to all weekdays (Mon-Fri = 1..5) for a specific person
+  Future<void> copyDayToAllWeekdays(int fromDay, {String? personId}) async {
     for (int day = 1; day <= 5; day++) {
       if (day != fromDay) {
-        await copyDay(fromDay, day);
+        await copyDay(fromDay, day, personId: personId);
       }
     }
   }
 
-  /// Clones active day to all 7 days of the week (Sun-Sat = 0..6)
-  Future<void> copyDayToAllDays(int fromDay) async {
+  /// Clones active day to all 7 days of the week (Sun-Sat = 0..6) for a specific person
+  Future<void> copyDayToAllDays(int fromDay, {String? personId}) async {
     for (int day = 0; day <= 6; day++) {
       if (day != fromDay) {
-        await copyDay(fromDay, day);
+        await copyDay(fromDay, day, personId: personId);
       }
     }
   }
 
-  /// Clears activities for a specific day
-  Future<void> clearDay(int dayOfWeek) async {
-    weeklySchedule.days[dayOfWeek] = DaySchedule(dayOfWeek: dayOfWeek, items: []);
-    await saveSchedule();
+  /// Clears activities for a specific day for a specific person
+  Future<void> clearDay(int dayOfWeek, {String? personId}) async {
+    final targetId = personId ?? activePersonId;
+    final schedule = getScheduleForPerson(targetId);
+    schedule.days[dayOfWeek] = DaySchedule(dayOfWeek: dayOfWeek, items: []);
+    await savePersonSchedule(targetId);
   }
 
-  /// Resets all 7 days to empty
-  Future<void> clearAllSchedules() async {
+  /// Resets all 7 days to empty for a specific person
+  Future<void> clearAllSchedules({String? personId}) async {
+    final targetId = personId ?? activePersonId;
+    final schedule = getScheduleForPerson(targetId);
     for (int day = 0; day <= 6; day++) {
-      weeklySchedule.days[day] = DaySchedule(dayOfWeek: day, items: []);
+      schedule.days[day] = DaySchedule(dayOfWeek: day, items: []);
     }
-    await saveSchedule();
+    await savePersonSchedule(targetId);
   }
 
-  /// Starter default routine with assignments to demonstrate multi-person capabilities
-  WeeklySchedule _createInitialDefaultSchedule() {
+  /// Creates distinct individual starter routines for each kid
+  WeeklySchedule _createInitialScheduleForPerson(String personId) {
     final schedule = WeeklySchedule.createDefault();
+
+    List<({String title, String time})> itemsTemplate;
+
+    if (personId == 'person_maya') {
+      itemsTemplate = [
+        (title: 'Wake-up Time', time: '07:00 AM'),
+        (title: 'Teeth Time', time: '07:15 AM'),
+        (title: 'Meal Time', time: '07:45 AM'),
+        (title: 'Arrival Time', time: '08:30 AM'),
+        (title: 'Study Time', time: '09:30 AM'),
+        (title: 'Lunch Time', time: '12:00 PM'),
+        (title: 'Play Time', time: '03:30 PM'),
+        (title: 'Story Time', time: '07:30 PM'),
+        (title: 'Sleep Time', time: '08:30 PM'),
+      ];
+    } else if (personId == 'person_alex') {
+      itemsTemplate = [
+        (title: 'Wake-up Time', time: '07:15 AM'),
+        (title: 'Teeth Time', time: '07:30 AM'),
+        (title: 'Meal Time', time: '08:00 AM'),
+        (title: 'Arrival Time', time: '08:45 AM'),
+        (title: 'Circle Time', time: '10:00 AM'),
+        (title: 'Lunch Time', time: '12:30 PM'),
+        (title: 'Outdoor Time', time: '04:00 PM'),
+        (title: 'Bath Time', time: '08:00 PM'),
+        (title: 'Sleep Time', time: '09:00 PM'),
+      ];
+    } else if (personId == 'person_sam') {
+      itemsTemplate = [
+        (title: 'Wake-up Time', time: '07:30 AM'),
+        (title: 'Dressing Time', time: '07:45 AM'),
+        (title: 'Meal Time', time: '08:15 AM'),
+        (title: 'Sensory Time', time: '09:30 AM'),
+        (title: 'Therapy Time', time: '10:30 AM'),
+        (title: 'Lunch Time', time: '12:00 PM'),
+        (title: 'Quiet Time', time: '01:00 PM'),
+        (title: 'Snack Time', time: '03:30 PM'),
+        (title: 'Sleep Time', time: '08:00 PM'),
+      ];
+    } else {
+      itemsTemplate = [
+        (title: 'Wake-up Time', time: '07:30 AM'),
+        (title: 'Teeth Time', time: '07:45 AM'),
+        (title: 'Meal Time', time: '08:15 AM'),
+        (title: 'Work Time', time: '09:00 AM'),
+        (title: 'Lunch Time', time: '12:30 PM'),
+        (title: 'Play Time', time: '04:00 PM'),
+        (title: 'Sleep Time', time: '08:30 PM'),
+      ];
+    }
 
     for (int day = 0; day < 7; day++) {
       schedule.days[day] = DaySchedule(
         dayOfWeek: day,
-        items: [
-          ScheduleItem(
-            id: 'sample_${day}_1',
-            title: 'Wake-up Time',
-            time: '07:00 AM',
-            iconCodePoint: SchedulePresets.getIconForLabel('Wake-up Time').codePoint,
-            assignedPersonId: 'person_maya',
+        items: itemsTemplate.asMap().entries.map((entry) {
+          final idx = entry.key;
+          final itemData = entry.value;
+          return ScheduleItem(
+            id: '${personId}_${day}_$idx',
+            title: itemData.title,
+            time: itemData.time,
+            iconCodePoint: SchedulePresets.getIconForLabel(itemData.title).codePoint,
+            assignedPersonId: personId,
             isCompleted: false,
-          ),
-          ScheduleItem(
-            id: 'sample_${day}_2',
-            title: 'Teeth Time',
-            time: '07:15 AM',
-            iconCodePoint: SchedulePresets.getIconForLabel('Teeth Time').codePoint,
-            assignedPersonId: 'person_alex',
-            isCompleted: false,
-          ),
-          ScheduleItem(
-            id: 'sample_${day}_3',
-            title: 'Meal Time',
-            time: '07:45 AM',
-            iconCodePoint: SchedulePresets.getIconForLabel('Meal Time').codePoint,
-            assignedPersonId: null, // Shared / Family meal
-            isCompleted: false,
-          ),
-          ScheduleItem(
-            id: 'sample_${day}_4',
-            title: 'Arrival Time',
-            time: '08:30 AM',
-            iconCodePoint: SchedulePresets.getIconForLabel('Arrival Time').codePoint,
-            assignedPersonId: 'person_maya',
-            isCompleted: false,
-          ),
-          ScheduleItem(
-            id: 'sample_${day}_5',
-            title: 'Circle Time',
-            time: '09:00 AM',
-            iconCodePoint: SchedulePresets.getIconForLabel('Circle Time').codePoint,
-            assignedPersonId: 'person_alex',
-            isCompleted: false,
-          ),
-          ScheduleItem(
-            id: 'sample_${day}_6',
-            title: 'Therapy Time',
-            time: '10:30 AM',
-            iconCodePoint: SchedulePresets.getIconForLabel('Therapy Time').codePoint,
-            assignedPersonId: 'person_sam',
-            isCompleted: false,
-          ),
-        ],
+          );
+        }).toList(),
       );
     }
 

@@ -274,7 +274,10 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => EditScheduleScreen(initialDayOfWeek: currentDayIndex),
+                      builder: (context) => EditScheduleScreen(
+                        initialDayOfWeek: currentDayIndex,
+                        personId: persons.isNotEmpty ? persons.first.id : null,
+                      ),
                     ),
                   );
                   setState(() {});

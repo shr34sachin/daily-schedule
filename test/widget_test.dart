@@ -75,7 +75,40 @@ void main() {
     expect(find.text('Alex'), findsWidgets);
   });
 
-  testWidgets('ScheduleScreen allows marking uncompleted items done',
+  testWidgets('Each user has individual schedule: editing Maya does not change Alex',
+      (WidgetTester tester) async {
+    // 1. Verify Maya and Alex start with their own schedules
+    final mayaSchedule = ScheduleService.instance.getScheduleForPerson('person_maya');
+    final alexSchedule = ScheduleService.instance.getScheduleForPerson('person_alex');
+
+    expect(mayaSchedule.getDay(1).items.any((i) => i.title == 'Study Time'), isTrue);
+    expect(alexSchedule.getDay(1).items.any((i) => i.title == 'Outdoor Time'), isTrue);
+
+    // 2. Add an exclusive activity to Maya's Monday schedule
+    await ScheduleService.instance.savePersonDaySchedule(
+      'person_maya',
+      1,
+      [
+        ScheduleItem(
+          id: 'maya_piano_solo',
+          title: 'Music Time',
+          time: '04:30 PM',
+          iconCodePoint: 58544,
+          assignedPersonId: 'person_maya',
+          isCompleted: false,
+        ),
+      ],
+    );
+
+    // 3. Maya should have Music Time on Monday, Alex must NOT have it
+    final updatedMayaItems = ScheduleService.instance.getScheduleForPerson('person_maya').getDay(1).items;
+    final updatedAlexItems = ScheduleService.instance.getScheduleForPerson('person_alex').getDay(1).items;
+
+    expect(updatedMayaItems.any((i) => i.id == 'maya_piano_solo'), isTrue);
+    expect(updatedAlexItems.any((i) => i.id == 'maya_piano_solo'), isFalse);
+  });
+
+  testWidgets('ScheduleScreen allows marking uncompleted items done for specific person',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(800, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -84,14 +117,14 @@ void main() {
       tester.view.resetDevicePixelRatio();
     });
 
-    // Add an anytime activity so it is in TO DO
+    // Add an anytime activity for Maya so it is in TO DO
     final now = DateTime.now();
     final currentDay = now.weekday == 7 ? 0 : now.weekday;
-    final daySchedule = ScheduleService.instance.weeklySchedule.getDay(currentDay);
-    daySchedule.items.add(
+    final mayaDaySchedule = ScheduleService.instance.getScheduleForPerson('person_maya').getDay(currentDay);
+    mayaDaySchedule.items.add(
       ScheduleItem(
-        id: 'test_story_time',
-        title: 'Story Time',
+        id: 'test_drawing_time',
+        title: 'Drawing Time',
         time: '', // Anytime, won't auto-complete
         iconCodePoint: 58544,
         assignedPersonId: 'person_maya',
@@ -110,9 +143,9 @@ void main() {
     expect(find.text('TO DO'), findsOneWidget);
     expect(find.text('DONE'), findsOneWidget);
 
-    // Find and tap "Story Time" card in TO DO
-    expect(find.text('Story Time'), findsOneWidget);
-    await tester.tap(find.text('Story Time'));
+    // Find and tap "Drawing Time" card in TO DO
+    expect(find.text('Drawing Time'), findsOneWidget);
+    await tester.tap(find.text('Drawing Time'));
     await tester.pumpAndSettle();
 
     // Dialog should ask "Is it done?"
@@ -123,9 +156,13 @@ void main() {
     await tester.tap(find.text('Yes, Done!'));
     await tester.pumpAndSettle();
 
-    // Verify it is now marked completed
-    final updatedItem = daySchedule.items.firstWhere((i) => i.id == 'test_story_time');
+    // Verify it is now marked completed for Maya
+    final updatedItem = mayaDaySchedule.items.firstWhere((i) => i.id == 'test_drawing_time');
     expect(updatedItem.isCompleted, isTrue);
+
+    // Alex's schedule should NOT have this item
+    final alexDaySchedule = ScheduleService.instance.getScheduleForPerson('person_alex').getDay(currentDay);
+    expect(alexDaySchedule.items.any((i) => i.id == 'test_drawing_time'), isFalse);
   });
 
   testWidgets('PersonManagementScreen allows adding and listing persons',
@@ -165,7 +202,7 @@ void main() {
     expect(find.text('Charlie'), findsOneWidget);
   });
 
-  testWidgets('EditScheduleScreen opens and renders day tabs and activities',
+  testWidgets('EditScheduleScreen opens and renders day tabs and activities for specified kid',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(800, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -176,13 +213,14 @@ void main() {
 
     await tester.pumpWidget(
       const MaterialApp(
-        home: EditScheduleScreen(initialDayOfWeek: 1),
+        home: EditScheduleScreen(initialDayOfWeek: 1, personId: 'person_alex'),
       ),
     );
     await tester.pumpAndSettle();
 
-    // Check day tabs
+    // Check day tabs and person-aware header
     expect(find.text('Mon'), findsWidgets);
+    expect(find.text("Edit Alex's Monday"), findsOneWidget);
     expect(find.text('Add Activity'), findsOneWidget);
     expect(find.text('Save Schedule'), findsOneWidget);
   });

@@ -4,7 +4,12 @@ import '../services/schedule_service.dart';
 
 class EditScheduleScreen extends StatefulWidget {
   final int initialDayOfWeek;
-  const EditScheduleScreen({super.key, required this.initialDayOfWeek});
+  final String? personId;
+  const EditScheduleScreen({
+    super.key,
+    required this.initialDayOfWeek,
+    this.personId,
+  });
 
   @override
   State<EditScheduleScreen> createState() => _EditScheduleScreenState();
@@ -12,36 +17,45 @@ class EditScheduleScreen extends StatefulWidget {
 
 class _EditScheduleScreenState extends State<EditScheduleScreen> {
   late int _activeDay;
+  late String? _selectedPersonId;
   late List<ScheduleItem> _items;
 
   @override
   void initState() {
     super.initState();
     _activeDay = widget.initialDayOfWeek;
+    _selectedPersonId = widget.personId ??
+        ScheduleService.instance.activePersonId ??
+        (ScheduleService.instance.persons.isNotEmpty
+            ? ScheduleService.instance.persons.first.id
+            : null);
     _loadItemsForDay();
   }
 
   void _loadItemsForDay() {
-    final daySchedule = ScheduleService.instance.weeklySchedule.getDay(_activeDay);
+    final schedule = ScheduleService.instance.getScheduleForPerson(_selectedPersonId);
+    final daySchedule = schedule.getDay(_activeDay);
     _items = daySchedule.items.map((e) => e.copyWith()).toList();
   }
 
   Future<void> _saveChanges() async {
-    ScheduleService.instance.weeklySchedule.days[_activeDay] = DaySchedule(
-      dayOfWeek: _activeDay,
-      items: _items,
-    );
-    await ScheduleService.instance.saveSchedule();
+    await ScheduleService.instance.savePersonDaySchedule(_selectedPersonId, _activeDay, _items);
     if (mounted) {
+      final personName = ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid';
+      final dayName = ScheduleService.instance.getScheduleForPerson(_selectedPersonId).getDay(_activeDay).dayName;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved ${ScheduleService.instance.weeklySchedule.getDay(_activeDay).dayName} schedule!')),
+        SnackBar(
+          content: Text("Saved $personName's $dayName schedule!"),
+          backgroundColor: Colors.green.shade700,
+        ),
       );
       Navigator.pop(context);
     }
   }
 
   void _confirmClearCurrentDay() {
-    final dayName = ScheduleService.instance.weeklySchedule.getDay(_activeDay).dayName;
+    final personName = ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid';
+    final dayName = ScheduleService.instance.getScheduleForPerson(_selectedPersonId).getDay(_activeDay).dayName;
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -50,10 +64,10 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
           children: [
             const Icon(Icons.delete_sweep, color: Colors.redAccent),
             const SizedBox(width: 8),
-            Expanded(child: Text('Clear $dayName?')),
+            Expanded(child: Text('Clear $personName\'s $dayName?')),
           ],
         ),
-        content: Text('Are you sure you want to delete all ${_items.length} activities for $dayName?'),
+        content: Text('Are you sure you want to delete all ${_items.length} activities for $personName on $dayName?'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
@@ -75,7 +89,6 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
     String selectedTitle = itemToEdit?.title ?? SchedulePresets.all.first.label;
     bool hasTime = itemToEdit != null && itemToEdit.time.isNotEmpty;
     TimeOfDay selectedTime = TimeOfDay.now();
-    String? assignedPersonId = itemToEdit?.assignedPersonId;
 
     if (itemToEdit != null && itemToEdit.time.isNotEmpty) {
       final parts = itemToEdit.time.split(' ');
@@ -107,7 +120,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
             final formattedTime = selectedTime.format(context);
             final screenWidth = MediaQuery.of(context).size.width;
             final crossAxisCount = screenWidth > 700 ? 5 : (screenWidth > 500 ? 4 : 3);
-            final persons = ScheduleService.instance.persons;
+            final currentPerson = ScheduleService.instance.getPersonById(_selectedPersonId);
 
             return Padding(
               padding: EdgeInsets.only(
@@ -125,66 +138,15 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          itemToEdit == null ? 'Add Activity' : 'Edit Activity',
+                          itemToEdit == null
+                              ? "Add to ${currentPerson?.name ?? 'Routine'}"
+                              : 'Edit Activity',
                           style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
                         ),
                         IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
                       ],
                     ),
                     const Divider(),
-
-                    // Person Assignment Section
-                    const Row(
-                      children: [
-                        Icon(Icons.person_pin, size: 18, color: Colors.indigo),
-                        SizedBox(width: 6),
-                        Text(
-                          'Assign to Person:',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          ChoiceChip(
-                            avatar: const Icon(Icons.groups, size: 16),
-                            label: const Text('Shared / All'),
-                            selected: assignedPersonId == null,
-                            onSelected: (val) {
-                              if (val) setModalState(() => assignedPersonId = null);
-                            },
-                          ),
-                          const SizedBox(width: 8),
-                          ...persons.map((person) {
-                            final isSelected = assignedPersonId == person.id;
-                            return Padding(
-                              padding: const EdgeInsets.only(right: 8.0),
-                              child: ChoiceChip(
-                                avatar: Text(person.avatarEmoji, style: const TextStyle(fontSize: 14)),
-                                label: Text(person.name),
-                                selected: isSelected,
-                                selectedColor: person.color.withValues(alpha: 0.25),
-                                labelStyle: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  color: isSelected ? person.color : Colors.black87,
-                                ),
-                                side: BorderSide(
-                                  color: isSelected ? person.color : Colors.grey.shade300,
-                                  width: isSelected ? 1.8 : 1.0,
-                                ),
-                                onSelected: (val) {
-                                  if (val) setModalState(() => assignedPersonId = person.id);
-                                },
-                              ),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
 
                     // Choose Preset Grid
                     const Text('Choose Activity Preset:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -199,54 +161,46 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                           childAspectRatio: screenWidth < 360 ? 0.85 : 0.95,
                         ),
                         itemCount: SchedulePresets.all.length,
-                        itemBuilder: (context, idx) {
-                          final template = SchedulePresets.all[idx];
+                        itemBuilder: (context, index) {
+                          final template = SchedulePresets.all[index];
                           final isSelected = !isCustom && selectedTitle == template.label;
-
                           return InkWell(
                             onTap: () {
                               setModalState(() {
                                 isCustom = false;
                                 selectedTitle = template.label;
+                                customTitleController.clear();
                               });
                             },
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.circular(12),
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                               decoration: BoxDecoration(
-                                color: isSelected ? template.color.withValues(alpha: 0.22) : Colors.grey.shade50,
-                                borderRadius: BorderRadius.circular(14),
+                                color: isSelected
+                                    ? template.color.withValues(alpha: 0.22)
+                                    : Colors.grey.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: isSelected ? template.color : Colors.grey.shade400,
-                                  width: isSelected ? 2.5 : 1.2,
+                                  color: isSelected ? template.color : Colors.transparent,
+                                  width: 2,
                                 ),
                               ),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Flexible(
-                                    child: FittedBox(
-                                      child: Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: template.color.withValues(alpha: 0.15),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Icon(template.icon, size: 26, color: template.color),
-                                      ),
-                                    ),
-                                  ),
+                                  Icon(template.icon, size: 26, color: template.color),
                                   const SizedBox(height: 4),
-                                  Flexible(
+                                  FittedBox(
+                                    fit: BoxFit.scaleDown,
                                     child: Text(
                                       template.label,
+                                      textAlign: TextAlign.center,
                                       style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: isSelected ? FontWeight.w900 : FontWeight.bold,
+                                        fontSize: 11,
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                         color: isSelected ? template.color : Colors.black87,
                                       ),
                                       maxLines: 2,
-                                      textAlign: TextAlign.center,
                                       overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
@@ -354,47 +308,53 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                     ),
                     const SizedBox(height: 18),
 
-                    // Action Button
+                    // Submit Action Button
                     SizedBox(
                       width: double.infinity,
-                      height: 50,
-                      child: ElevatedButton(
+                      child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          backgroundColor: currentPerson?.color ?? Colors.blue,
+                          foregroundColor: Colors.white,
                         ),
                         onPressed: () {
-                          final finalTitle = isCustom && customTitleController.text.trim().isNotEmpty
+                          final titleToUse = isCustom && customTitleController.text.trim().isNotEmpty
                               ? customTitleController.text.trim()
                               : selectedTitle;
-                          final finalIcon = SchedulePresets.getIconForLabel(finalTitle);
-                          final finalTime = hasTime ? formattedTime : '';
 
-                          if (itemToEdit != null && editIndex != null) {
+                          final timeToUse = hasTime ? formattedTime : '';
+
+                          if (itemToEdit == null) {
+                            // Add New Activity
                             setState(() {
-                              _items[editIndex] = itemToEdit.copyWith(
-                                title: finalTitle,
-                                time: finalTime,
-                                iconCodePoint: finalIcon.codePoint,
-                                notes: notesController.text.trim(),
-                                assignedPersonId: assignedPersonId,
+                              _items.add(
+                                ScheduleItem(
+                                  id: '${DateTime.now().millisecondsSinceEpoch}_${titleToUse.replaceAll(' ', '_')}',
+                                  title: titleToUse,
+                                  time: timeToUse,
+                                  iconCodePoint: SchedulePresets.getIconForLabel(titleToUse).codePoint,
+                                  notes: notesController.text.trim(),
+                                  assignedPersonId: _selectedPersonId,
+                                  isCompleted: false,
+                                ),
                               );
                             });
                           } else {
+                            // Edit Existing
                             setState(() {
-                              _items.add(ScheduleItem(
-                                id: DateTime.now().millisecondsSinceEpoch.toString(),
-                                title: finalTitle,
-                                time: finalTime,
-                                iconCodePoint: finalIcon.codePoint,
-                                notes: notesController.text.trim(),
-                                assignedPersonId: assignedPersonId,
-                              ));
+                              itemToEdit.title = titleToUse;
+                              itemToEdit.time = timeToUse;
+                              itemToEdit.iconCodePoint = SchedulePresets.getIconForLabel(titleToUse).codePoint;
+                              itemToEdit.notes = notesController.text.trim();
+                              itemToEdit.assignedPersonId = _selectedPersonId;
                             });
                           }
                           Navigator.pop(ctx);
                         },
-                        child: Text(
-                          itemToEdit == null ? 'Add to Schedule' : 'Update Activity',
+                        icon: const Icon(Icons.check),
+                        label: Text(
+                          itemToEdit == null ? 'Add Activity' : 'Save Changes',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -411,27 +371,29 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
 
   void _showCopyFromDayDialog() {
     int sourceDay = (_activeDay == 1 ? 0 : 1);
+    final schedule = ScheduleService.instance.getScheduleForPerson(_selectedPersonId);
+    final personName = ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid';
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final targetName = ScheduleService.instance.weeklySchedule.getDay(_activeDay).dayName;
+          final targetName = schedule.getDay(_activeDay).dayName;
 
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Row(
+            title: Row(
               children: [
-                Icon(Icons.copy, color: Colors.blue),
-                SizedBox(width: 8),
-                Text('Copy Routine'),
+                const Icon(Icons.copy, color: Colors.blue),
+                const SizedBox(width: 8),
+                Expanded(child: Text("Copy $personName's Routine")),
               ],
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Replace $targetName with the complete schedule from:'),
+                Text('Replace $targetName with $personName\'s routine from:'),
                 const SizedBox(height: 14),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -444,7 +406,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                       value: sourceDay,
                       isExpanded: true,
                       items: List.generate(7, (index) {
-                        final day = ScheduleService.instance.weeklySchedule.getDay(index);
+                        final day = schedule.getDay(index);
                         return DropdownMenuItem<int>(
                           value: index,
                           child: Text("${day.dayName} (${day.items.length} items)"),
@@ -462,11 +424,12 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               ElevatedButton(
                 onPressed: () {
-                  final sourceItems = ScheduleService.instance.weeklySchedule.getDay(sourceDay).items;
+                  final sourceItems = schedule.getDay(sourceDay).items;
                   setState(() {
                     _items = sourceItems.map((e) => e.copyWith(
                       id: '${DateTime.now().millisecondsSinceEpoch}_${e.title}',
                       isCompleted: false,
+                      assignedPersonId: _selectedPersonId,
                     )).toList();
                   });
                   Navigator.pop(ctx);
@@ -480,15 +443,90 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
     );
   }
 
+  // Kid Selector Bar
+  Widget _buildPersonSelectorBar() {
+    final persons = ScheduleService.instance.persons;
+    if (persons.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: Colors.white,
+      child: Row(
+        children: [
+          const Text('Kid:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              itemCount: persons.length,
+              itemBuilder: (context, index) {
+                final p = persons[index];
+                final isSelected = _selectedPersonId == p.id;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: ChoiceChip(
+                    avatar: Text(p.avatarEmoji, style: const TextStyle(fontSize: 14)),
+                    label: Text(p.name),
+                    selected: isSelected,
+                    selectedColor: p.color.withValues(alpha: 0.25),
+                    labelStyle: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? p.color : Colors.black87,
+                    ),
+                    side: BorderSide(
+                      color: isSelected ? p.color : Colors.grey.shade300,
+                      width: isSelected ? 2 : 1,
+                    ),
+                    onSelected: (val) {
+                      if (val) {
+                        setState(() {
+                          _selectedPersonId = p.id;
+                          _loadItemsForDay();
+                        });
+                      }
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final daySchedule = ScheduleService.instance.weeklySchedule.getDay(_activeDay);
+    final currentPerson = ScheduleService.instance.getPersonById(_selectedPersonId);
+    final schedule = ScheduleService.instance.getScheduleForPerson(_selectedPersonId);
+    final daySchedule = schedule.getDay(_activeDay);
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Edit ${daySchedule.dayName}', overflow: TextOverflow.ellipsis),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (currentPerson != null) ...[
+              Text(currentPerson.avatarEmoji, style: const TextStyle(fontSize: 20)),
+              const SizedBox(width: 6),
+            ],
+            Flexible(
+              child: Text(
+                currentPerson != null
+                    ? "Edit ${currentPerson.name}'s ${daySchedule.dayName}"
+                    : "Edit ${daySchedule.dayName}",
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: currentPerson?.color,
+                ),
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.check),
@@ -522,7 +560,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                   children: [
                     Icon(Icons.delete_sweep, size: 20, color: Colors.redAccent),
                     SizedBox(width: 8),
-                    Text('Clear current day'),
+                    Text('Clear this day'),
                   ],
                 ),
               ),
@@ -535,24 +573,34 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
           constraints: const BoxConstraints(maxWidth: 800),
           child: Column(
             children: [
-              // Day Tabs Header
+              // Kid Switcher Strip
+              _buildPersonSelectorBar(),
+
+              // 7-Day Selector Bar
               Container(
-                height: 52,
-                color: theme.colorScheme.surface,
+                height: 54,
+                color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   itemCount: 7,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                   itemBuilder: (context, index) {
                     final isSelected = _activeDay == index;
-                    final day = ScheduleService.instance.weeklySchedule.getDay(index);
+                    final day = schedule.getDay(index);
+                    final hasItems = day.items.isNotEmpty;
 
                     return Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4.0),
                       child: ChoiceChip(
-                        label: Text(day.shortDayName, style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? Colors.white : Colors.black87)),
+                        label: Text(
+                          day.shortDayName,
+                          style: TextStyle(
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? Colors.white : (hasItems ? Colors.black87 : Colors.grey),
+                          ),
+                        ),
                         selected: isSelected,
-                        selectedColor: theme.primaryColor,
+                        selectedColor: currentPerson?.color ?? theme.primaryColor,
                         onSelected: (selected) {
                           if (selected) {
                             setState(() {
@@ -566,31 +614,34 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                   },
                 ),
               ),
-              const Divider(height: 1),
 
-              // Reorderable list of items
+              // Activities List
               Expanded(
                 child: _items.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.playlist_add, size: 64, color: Colors.grey.shade400),
+                            Icon(Icons.event_note, size: 54, color: Colors.grey.shade400),
                             const SizedBox(height: 12),
                             Text(
-                              'No activities yet for ${daySchedule.dayName}',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87),
+                              currentPerson != null
+                                  ? "No activities for ${currentPerson.name} on ${daySchedule.dayName}"
+                                  : "No activities on ${daySchedule.dayName}",
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 6),
-                            const Text('Tap "+ Add Activity" below to build this day\'s schedule.', style: TextStyle(color: Colors.grey)),
+                            const Text('Tap "+ Add Activity" below to get started!'),
                           ],
                         ),
                       )
                     : ReorderableListView.builder(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 80),
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 80),
                         itemCount: _items.length,
-                        onReorderItem: (oldIndex, newIndex) {
+                        // ignore: deprecated_member_use
+                        onReorder: (oldIndex, newIndex) {
                           setState(() {
+                            if (oldIndex < newIndex) newIndex -= 1;
                             final item = _items.removeAt(oldIndex);
                             _items.insert(newIndex, item);
                           });
@@ -598,153 +649,80 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                         itemBuilder: (context, index) {
                           final item = _items[index];
                           final presetColor = SchedulePresets.getColorForLabel(item.title);
-                          final assignedPerson = ScheduleService.instance.getPersonById(item.assignedPersonId);
 
                           return Card(
                             key: ValueKey(item.id),
-                            margin: const EdgeInsets.only(bottom: 10),
-                            elevation: 1,
+                            margin: const EdgeInsets.only(bottom: 8),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              side: BorderSide(
-                                color: isDark ? presetColor.withValues(alpha: 0.5) : presetColor.withValues(alpha: 0.35),
-                                width: 1.2,
-                              ),
+                              borderRadius: BorderRadius.circular(14),
+                              side: BorderSide(color: presetColor.withValues(alpha: 0.35)),
                             ),
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                              child: Row(
-                                children: [
-                                  // Order Index Badge
-                                  Container(
-                                    width: 26,
-                                    height: 26,
-                                    alignment: Alignment.center,
-                                    decoration: BoxDecoration(
-                                      color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      '${index + 1}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.white70 : Colors.grey.shade800,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-
-                                  // Icon
-                                  Container(
-                                    padding: const EdgeInsets.all(10),
-                                    decoration: BoxDecoration(
-                                      color: presetColor.withValues(alpha: 0.16),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Icon(item.icon, color: presetColor, size: 24),
-                                  ),
-                                  const SizedBox(width: 12),
-
-                                  // Title, Assigned Person Badge & Subtitle Info
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                            child: ListTile(
+                              leading: Container(
+                                width: 38,
+                                height: 38,
+                                decoration: BoxDecoration(
+                                  color: presetColor.withValues(alpha: 0.15),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(item.icon, color: presetColor, size: 22),
+                              ),
+                              title: Text(
+                                item.title,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              ),
+                              subtitle: item.time.isNotEmpty
+                                  ? Row(
                                       children: [
+                                        Icon(Icons.access_time, size: 12, color: Colors.grey.shade600),
+                                        const SizedBox(width: 4),
                                         Text(
-                                          item.title,
+                                          item.time,
                                           style: TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 15,
-                                            color: isDark ? Colors.white : Colors.black87,
+                                            color: Colors.grey.shade700,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 12,
                                           ),
                                         ),
-                                        const SizedBox(height: 4),
-                                        Wrap(
-                                          spacing: 6,
-                                          runSpacing: 4,
-                                          children: [
-                                            // Assigned Person Badge
-                                            if (assignedPerson != null)
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: assignedPerson.color.withValues(alpha: 0.14),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                  border: Border.all(color: assignedPerson.color.withValues(alpha: 0.4)),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Text(assignedPerson.avatarEmoji, style: const TextStyle(fontSize: 11)),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      assignedPerson.name,
-                                                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: assignedPerson.color),
-                                                    ),
-                                                  ],
-                                                ),
-                                              )
-                                            else
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.grey.withValues(alpha: 0.12),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: const Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Icon(Icons.groups, size: 11, color: Colors.grey),
-                                                    SizedBox(width: 4),
-                                                    Text('Shared', style: TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold)),
-                                                  ],
-                                                ),
-                                              ),
-
-                                            // Time badge
-                                            if (item.time.isNotEmpty)
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.blue.withValues(alpha: 0.12),
-                                                  borderRadius: BorderRadius.circular(6),
-                                                ),
-                                                child: Row(
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    const Icon(Icons.access_time, size: 11, color: Colors.blue),
-                                                    const SizedBox(width: 4),
-                                                    Text(
-                                                      item.time,
-                                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                          ],
-                                        ),
+                                        if (item.notes.isNotEmpty) ...[
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              "• ${item.notes}",
+                                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                        ],
                                       ],
-                                    ),
-                                  ),
-
-                                  // Action Buttons
+                                    )
+                                  : (item.notes.isNotEmpty
+                                      ? Text(
+                                          item.notes,
+                                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                          overflow: TextOverflow.ellipsis,
+                                        )
+                                      : null),
+                              trailing: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
                                   IconButton(
-                                    icon: const Icon(Icons.edit_outlined, size: 20, color: Colors.blueAccent),
-                                    tooltip: 'Edit',
+                                    icon: const Icon(Icons.edit_outlined, size: 20),
+                                    tooltip: 'Edit Activity',
                                     onPressed: () => _showAddOrEditItemDialog(itemToEdit: item, editIndex: index),
                                   ),
                                   IconButton(
                                     icon: const Icon(Icons.delete_outline, size: 20, color: Colors.redAccent),
-                                    tooltip: 'Remove',
-                                    onPressed: () => setState(() => _items.removeAt(index)),
+                                    tooltip: 'Delete Activity',
+                                    onPressed: () {
+                                      setState(() {
+                                        _items.removeAt(index);
+                                      });
+                                    },
                                   ),
                                   ReorderableDragStartListener(
                                     index: index,
-                                    child: const Padding(
-                                      padding: EdgeInsets.symmetric(horizontal: 4.0),
-                                      child: Icon(Icons.drag_handle, color: Colors.grey),
-                                    ),
+                                    child: const Icon(Icons.drag_handle, color: Colors.grey),
                                   ),
                                 ],
                               ),
@@ -757,32 +735,44 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(14.0),
+      bottomNavigationBar: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 6,
+              offset: const Offset(0, -2),
+            ),
+          ],
+        ),
+        child: SafeArea(
           child: Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () => _showAddOrEditItemDialog(),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add Activity', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
+                  onPressed: () => _showAddOrEditItemDialog(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add Activity', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton.icon(
-                  onPressed: _saveChanges,
-                  icon: const Icon(Icons.save),
-                  label: const Text('Save Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
+                    backgroundColor: currentPerson?.color ?? theme.primaryColor,
+                    foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
+                  onPressed: _saveChanges,
+                  icon: const Icon(Icons.check),
+                  label: const Text('Save Schedule', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
             ],

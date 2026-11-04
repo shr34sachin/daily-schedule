@@ -55,7 +55,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   void _checkTimeShift() {
     final now = DateTime.now();
     final currentDay = now.weekday == 7 ? 0 : now.weekday;
-    final todaySchedule = ScheduleService.instance.weeklySchedule.getDay(currentDay);
+    final currentPersonId = ScheduleService.instance.activePersonId;
+    final schedule = ScheduleService.instance.getScheduleForPerson(currentPersonId);
+    final todaySchedule = schedule.getDay(currentDay);
 
     bool changed = false;
     for (var item in todaySchedule.items) {
@@ -72,7 +74,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       }
     }
     if (changed) {
-      ScheduleService.instance.saveSchedule();
+      ScheduleService.instance.savePersonSchedule(currentPersonId);
       setState(() {});
     }
   }
@@ -185,7 +187,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 setState(() {
                   item.isCompleted = true;
                 });
-                await ScheduleService.instance.saveSchedule();
+                final currentPersonId = ScheduleService.instance.activePersonId;
+                await ScheduleService.instance.savePersonSchedule(currentPersonId);
                 final kid = ScheduleService.instance.activePerson;
                 if (kid != null) {
                   _speak("Great job ${kid.name}! ${item.title} is done! ⭐");
@@ -232,7 +235,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               setState(() {
                 item.isCompleted = false;
               });
-              await ScheduleService.instance.saveSchedule();
+              final currentPersonId = ScheduleService.instance.activePersonId;
+              await ScheduleService.instance.savePersonSchedule(currentPersonId);
               _speak("${item.title} moved back to To Do.");
             },
             child: const Text('Move to To Do'),
@@ -243,7 +247,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   }
 
   void _showCopyDialog() {
-    final currentDay = ScheduleService.instance.weeklySchedule.getDay(_selectedDayOfWeek);
+    final activePerson = ScheduleService.instance.activePerson;
+    final schedule = ScheduleService.instance.getScheduleForPerson(activePerson?.id);
+    final currentDay = schedule.getDay(_selectedDayOfWeek);
     int targetDay = (_selectedDayOfWeek + 1) % 7;
 
     showDialog(
@@ -258,7 +264,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Copy ${currentDay.dayName}',
+                    activePerson != null
+                        ? "Copy ${activePerson.name}'s ${currentDay.dayName}"
+                        : 'Copy ${currentDay.dayName}',
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -282,7 +290,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         value: targetDay,
                         isExpanded: true,
                         items: List.generate(7, (index) {
-                          final day = ScheduleService.instance.weeklySchedule.getDay(index);
+                          final day = schedule.getDay(index);
                           return DropdownMenuItem<int>(
                             value: index,
                             child: Text(
@@ -301,7 +309,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   OutlinedButton.icon(
                     onPressed: () async {
                       Navigator.pop(ctx);
-                      await ScheduleService.instance.copyDayToAllWeekdays(_selectedDayOfWeek);
+                      await ScheduleService.instance.copyDayToAllWeekdays(_selectedDayOfWeek, personId: activePerson?.id);
                       setState(() {});
                     },
                     icon: const Icon(Icons.calendar_view_week, size: 18),
@@ -311,7 +319,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   OutlinedButton.icon(
                     onPressed: () async {
                       Navigator.pop(ctx);
-                      await ScheduleService.instance.copyDayToAllDays(_selectedDayOfWeek);
+                      await ScheduleService.instance.copyDayToAllDays(_selectedDayOfWeek, personId: activePerson?.id);
                       setState(() {});
                     },
                     icon: const Icon(Icons.date_range, size: 18),
@@ -325,7 +333,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               ElevatedButton(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  await ScheduleService.instance.copyDay(_selectedDayOfWeek, targetDay);
+                  await ScheduleService.instance.copyDay(_selectedDayOfWeek, targetDay, personId: activePerson?.id);
                   setState(() {
                     _selectedDayOfWeek = targetDay;
                   });
@@ -347,14 +355,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         final theme = Theme.of(context);
         final now = DateTime.now();
         final greetingInfo = TimeOfDayGreetingInfo.getForTime(now);
-        final daySchedule = ScheduleService.instance.weeklySchedule.getDay(_selectedDayOfWeek);
-        final isToday = (now.weekday == 7 ? 0 : now.weekday) == _selectedDayOfWeek;
         final activePerson = ScheduleService.instance.activePerson;
+        final schedule = ScheduleService.instance.getScheduleForPerson(activePerson?.id);
+        final daySchedule = schedule.getDay(_selectedDayOfWeek);
+        final isToday = (now.weekday == 7 ? 0 : now.weekday) == _selectedDayOfWeek;
 
-        // Filter items based on active person
-        final filteredItems = ScheduleService.instance.filterItems(daySchedule.items);
-        final todoItems = filteredItems.where((e) => !e.isCompleted).toList();
-        final doneItems = filteredItems.where((e) => e.isCompleted).toList();
+        // Individual kid schedule items
+        final todoItems = daySchedule.items.where((e) => !e.isCompleted).toList();
+        final doneItems = daySchedule.items.where((e) => e.isCompleted).toList();
 
         return Scaffold(
           appBar: AppBar(
@@ -426,7 +434,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   await Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => EditScheduleScreen(initialDayOfWeek: _selectedDayOfWeek),
+                      builder: (context) => EditScheduleScreen(
+                        initialDayOfWeek: _selectedDayOfWeek,
+                        personId: activePerson?.id,
+                      ),
                     ),
                   );
                   setState(() {
@@ -440,11 +451,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 onSelected: (val) {
                   if (val == 'copy') _showCopyDialog();
                   if (val == 'clear_day') {
-                    ScheduleService.instance.clearDay(_selectedDayOfWeek);
+                    ScheduleService.instance.clearDay(_selectedDayOfWeek, personId: activePerson?.id);
                     setState(() {});
                   }
                   if (val == 'clear_all') {
-                    ScheduleService.instance.clearAllSchedules();
+                    ScheduleService.instance.clearAllSchedules(personId: activePerson?.id);
                     setState(() {});
                   }
                   if (val == 'manage_people') {
@@ -481,7 +492,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
                   // 4. TWO-COLUMN (TO DO & DONE) SCHEDULE BOARD
                   Expanded(
-                    child: filteredItems.isEmpty
+                    child: daySchedule.items.isEmpty
                         ? _buildEmptyScheduleView(daySchedule, activePerson)
                         : _buildTwoColumnBoard(todoItems, doneItems, theme),
                   ),
@@ -494,7 +505,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => EditScheduleScreen(initialDayOfWeek: _selectedDayOfWeek),
+                  builder: (context) => EditScheduleScreen(
+                    initialDayOfWeek: _selectedDayOfWeek,
+                    personId: activePerson?.id,
+                  ),
                 ),
               );
               setState(() {
@@ -502,6 +516,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               });
             },
             icon: const Icon(Icons.add_task),
+            backgroundColor: activePerson?.color,
             label: Text(
               activePerson != null
                   ? 'Set ${activePerson.name}\'s ${daySchedule.shortDayName}'
@@ -670,6 +685,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   // 7-Day Horizontal Selector Strip
   Widget _buildDaySelectorStrip(ThemeData theme, DateTime now) {
     final todayDayIndex = now.weekday == 7 ? 0 : now.weekday;
+    final activePerson = ScheduleService.instance.activePerson;
+    final schedule = ScheduleService.instance.getScheduleForPerson(activePerson?.id);
 
     return Container(
       height: 78,
@@ -681,8 +698,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         itemBuilder: (context, index) {
           final isSelected = _selectedDayOfWeek == index;
           final isCurrentToday = todayDayIndex == index;
-          final day = ScheduleService.instance.weeklySchedule.getDay(index);
-          final progress = ScheduleService.instance.getDayProgress(index);
+          final day = schedule.getDay(index);
+          final progress = ScheduleService.instance.getDayProgress(index, personId: activePerson?.id);
 
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4.0),
@@ -1087,7 +1104,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (context) => EditScheduleScreen(initialDayOfWeek: _selectedDayOfWeek),
+                        builder: (context) => EditScheduleScreen(
+                          initialDayOfWeek: _selectedDayOfWeek,
+                          personId: activePerson?.id,
+                        ),
                       ),
                     );
                     setState(() {
