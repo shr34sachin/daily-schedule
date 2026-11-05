@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'screens/user_selection_screen.dart';
+import 'services/csv_storage_service.dart';
 import 'services/schedule_service.dart';
 import 'services/settings_service.dart';
 
@@ -7,6 +8,13 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ScheduleService.instance.init();
   await SettingsService.instance.init();
+  await CsvStorageService.instance.init();
+
+  // Connect auto-save listener for offline CSV mode
+  ScheduleService.instance.onDataChanged = () {
+    CsvStorageService.instance.autoSaveIfOfflineMode();
+  };
+
   runApp(const DailyScheduleApp());
 }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/csv_storage_service.dart';
 import '../services/settings_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -34,12 +35,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return 'Higher / Cheerful';
   }
 
+  String _formatTimestamp(DateTime dt) {
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inSeconds < 60) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: SettingsService.instance,
+      listenable: Listenable.merge([SettingsService.instance, CsvStorageService.instance]),
       builder: (context, _) {
         final settings = SettingsService.instance;
+        final csvService = CsvStorageService.instance;
         final theme = Theme.of(context);
         final isDark = theme.brightness == Brightness.dark;
 
@@ -365,6 +376,287 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
 
+                  const SizedBox(height: 24),
+
+                  // =================== SECTION 3: OFFLINE CSV MODE ===================
+                  _buildSectionHeader(
+                    icon: Icons.table_view_rounded,
+                    title: 'Offline CSV Mode & Sync',
+                    subtitle: 'Store routines and images in a local CSV file editable in Excel',
+                    color: Colors.teal,
+                  ),
+                  const SizedBox(height: 10),
+                  Card(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                      side: BorderSide(
+                        color: isDark ? Colors.grey.shade800 : Colors.grey.shade200,
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 1. OFFLINE CSV MODE TOGGLE
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: Colors.teal.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.file_present_rounded, color: Colors.teal, size: 22),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Offline CSV Mode',
+                                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                    ),
+                                    SizedBox(height: 2),
+                                    Text(
+                                      'Save and sync all data to a CSV file on your device',
+                                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: csvService.isOfflineCsvModeEnabled,
+                                activeThumbColor: Colors.teal,
+                                onChanged: (val) async {
+                                  await csvService.setOfflineCsvMode(val);
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          val
+                                              ? 'Offline CSV Mode enabled! Choose or export a CSV file below.'
+                                              : 'Offline CSV Mode disabled.',
+                                        ),
+                                        duration: const Duration(seconds: 2),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+
+                          if (!csvService.isOfflineCsvModeEnabled) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.info_outline, size: 18, color: Colors.grey.shade600),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Enable Offline CSV Mode to choose or export a CSV file and sync routines with Excel or Google Sheets.',
+                                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+
+                          if (csvService.isOfflineCsvModeEnabled) ...[
+                            const SizedBox(height: 16),
+                            const Divider(),
+                            const SizedBox(height: 12),
+
+                            // ACTIVE FILE PATH BADGE
+                            const Text(
+                              'Linked CSV File:',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: (csvService.activeCsvFilePath != null ? Colors.teal : Colors.amber)
+                                    .withValues(alpha: isDark ? 0.16 : 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: (csvService.activeCsvFilePath != null ? Colors.teal : Colors.amber)
+                                      .withValues(alpha: 0.4),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        csvService.activeCsvFilePath != null
+                                            ? Icons.check_circle_rounded
+                                            : Icons.warning_amber_rounded,
+                                        size: 16,
+                                        color: csvService.activeCsvFilePath != null ? Colors.teal : Colors.amber.shade800,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        csvService.activeCsvFilePath != null
+                                            ? 'Active CSV Linked'
+                                            : 'No CSV File Selected',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: csvService.activeCsvFilePath != null ? Colors.teal : Colors.amber.shade800,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    csvService.activeCsvFilePath ?? 'Choose an existing CSV file or export current data to create one.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontFamily: csvService.activeCsvFilePath != null ? 'monospace' : null,
+                                      color: isDark ? Colors.grey.shade300 : Colors.grey.shade800,
+                                    ),
+                                  ),
+                                  if (csvService.lastSyncedAt != null) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Last synced: ${_formatTimestamp(csvService.lastSyncedAt!)}',
+                                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // ACTION BUTTONS (CHOOSE/UPLOAD, SAVE/EXPORT, SYNC/RELOAD)
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ElevatedButton.icon(
+                                  onPressed: () async {
+                                    final success = await csvService.importFromCsvFile();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            success
+                                                ? 'Successfully loaded schedules and images from CSV!'
+                                                : 'Import cancelled or invalid CSV file.',
+                                          ),
+                                          backgroundColor: success ? Colors.green.shade700 : null,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.file_open_rounded, size: 18),
+                                  label: const Text('Choose / Upload CSV'),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.teal,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final path = await csvService.exportToCsvFile();
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            path != null
+                                                ? 'Saved all routines & images to CSV!'
+                                                : 'Export cancelled.',
+                                          ),
+                                          backgroundColor: path != null ? Colors.teal.shade700 : null,
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  icon: const Icon(Icons.save_as_rounded, size: 18),
+                                  label: const Text('Save / Export to CSV'),
+                                  style: OutlinedButton.styleFrom(
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                if (csvService.activeCsvFilePath != null)
+                                  OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final success = await csvService.reloadFromActiveCsv();
+                                      if (context.mounted) {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              success
+                                                  ? 'Synced latest edits from CSV file!'
+                                                  : 'Failed to read active CSV file.',
+                                            ),
+                                            backgroundColor: success ? Colors.green.shade700 : Colors.redAccent,
+                                          ),
+                                        );
+                                      }
+                                    },
+                                    icon: const Icon(Icons.sync_rounded, size: 18),
+                                    label: const Text('Sync Edits Now'),
+                                    style: OutlinedButton.styleFrom(
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                  ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            // IMAGE STORAGE EXPLANATION & CSV FORMAT
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withValues(alpha: isDark ? 0.14 : 0.06),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.blue.withValues(alpha: 0.25)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.photo_library_outlined, size: 18, color: Colors.blue),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'How Images & Edits Work:',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.blue),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    '• Character and activity images are stored in an "images/" subfolder right where your CSV file is located.\n'
+                                    '• Open the CSV in Excel, Notepad, or Google Sheets to add or edit activities, change times, or mark tasks done.\n'
+                                    '• When you save your edits in Excel, tap "Sync Edits Now" or restart the app to immediately see the changes reflected!',
+                                    style: TextStyle(fontSize: 12, height: 1.45, color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
                   const SizedBox(height: 32),
                 ],
               ),
@@ -466,3 +758,4 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
+

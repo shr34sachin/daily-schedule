@@ -13,6 +13,7 @@ class ScheduleService extends ChangeNotifier {
   WeeklySchedule _sharedSchedule = WeeklySchedule.createDefault();
   List<Person> persons = [];
   String? activePersonId; // null = View All / Shared
+  VoidCallback? onDataChanged;
 
   static const String _personSchedulePrefix = 'daily_schedule_person_';
   static const String _sharedScheduleKey = 'daily_schedule_shared';
@@ -138,7 +139,7 @@ class ScheduleService extends ChangeNotifier {
   }
 
   /// Persists the individual schedule for a specific person
-  Future<void> savePersonSchedule(String? personId) async {
+  Future<void> savePersonSchedule(String? personId, {bool triggerAutoSave = true}) async {
     final prefs = await SharedPreferences.getInstance();
     if (personId == null || personId.isEmpty) {
       await prefs.setString(_sharedScheduleKey, jsonEncode(_sharedSchedule.toJson()));
@@ -147,6 +148,9 @@ class ScheduleService extends ChangeNotifier {
       await prefs.setString('$_personSchedulePrefix$personId', jsonEncode(schedule.toJson()));
     }
     notifyListeners();
+    if (triggerAutoSave) {
+      onDataChanged?.call();
+    }
   }
 
   /// Saves activities for a specific day for a specific person
@@ -164,9 +168,35 @@ class ScheduleService extends ChangeNotifier {
     await savePersonSchedule(activePersonId);
   }
 
-  Future<void> savePersons() async {
+  Future<void> savePersons({bool triggerAutoSave = true}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_personsStorageKey, jsonEncode(persons.map((e) => e.toJson()).toList()));
+    notifyListeners();
+    if (triggerAutoSave) {
+      onDataChanged?.call();
+    }
+  }
+
+  /// Fully replaces in-memory schedule and profiles with imported CSV data
+  Future<void> replaceAllData({
+    required List<Person> newPersons,
+    required Map<String, WeeklySchedule> newPersonSchedules,
+    required WeeklySchedule newSharedSchedule,
+  }) async {
+    persons = newPersons;
+    _personSchedules.clear();
+    _personSchedules.addAll(newPersonSchedules);
+    _sharedSchedule = newSharedSchedule;
+
+    if (activePersonId != null && !persons.any((p) => p.id == activePersonId)) {
+      activePersonId = null;
+    }
+
+    await savePersons(triggerAutoSave: false);
+    for (final p in persons) {
+      await savePersonSchedule(p.id, triggerAutoSave: false);
+    }
+    await savePersonSchedule(null, triggerAutoSave: false);
     notifyListeners();
   }
 

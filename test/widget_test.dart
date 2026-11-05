@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -11,6 +13,7 @@ import 'package:daily_schedule/screens/edit_schedule_screen.dart';
 import 'package:daily_schedule/screens/settings_screen.dart';
 import 'package:daily_schedule/services/schedule_service.dart';
 import 'package:daily_schedule/services/settings_service.dart';
+import 'package:daily_schedule/services/csv_storage_service.dart';
 
 void main() {
   setUp(() async {
@@ -29,6 +32,12 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     await ScheduleService.instance.init();
     await SettingsService.instance.init();
+    await CsvStorageService.instance.init();
+    await CsvStorageService.instance.setOfflineCsvMode(false);
+    await CsvStorageService.instance.setActiveCsvFilePath(null);
+    ScheduleService.instance.onDataChanged = () {
+      CsvStorageService.instance.autoSaveIfOfflineMode();
+    };
   });
 
   testWidgets('DailyScheduleApp boots to front page showing kid profiles and navigates to kid schedule',
@@ -408,5 +417,150 @@ void main() {
     // Now on SettingsScreen
     expect(find.text('Settings & Preferences'), findsOneWidget);
     expect(find.text('Speech Speed'), findsOneWidget);
+  });
+
+  test('CsvStorageService exports and imports data with images and reflects edits', () async {
+    final tempDir = Directory.systemTemp.createTempSync('csv_test_');
+    addTearDown(() {
+      if (tempDir.existsSync()) {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    final csvFilePath = '${tempDir.path}${Platform.pathSeparator}test_schedule.csv';
+
+    // Add a custom image to Maya
+    final dummyImageBytes = base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+    );
+    final dummyBase64 = base64Encode(dummyImageBytes);
+
+    await ScheduleService.instance.updatePerson(
+      Person(
+        id: 'person_maya',
+        name: 'Maya SuperStar',
+        role: 'Big Sister',
+        colorValue: Colors.purple.toARGB32(),
+        avatarEmoji: '🌟',
+        customImageBase64: dummyBase64,
+      ),
+    );
+
+    // Export to CSV
+    final exportedPath = await CsvStorageService.instance.exportToCsvFile(
+      targetFilePath: csvFilePath,
+    );
+    expect(exportedPath, isNotNull);
+    final csvFile = File(csvFilePath);
+    expect(csvFile.existsSync(), isTrue);
+
+    // Verify images folder and person image file exist
+    final imagesDir = Directory('${tempDir.path}${Platform.pathSeparator}images');
+    expect(imagesDir.existsSync(), isTrue);
+    final expectedPersonImg = File('${imagesDir.path}${Platform.pathSeparator}person_person_maya.png');
+    expect(expectedPersonImg.existsSync(), isTrue);
+    expect(expectedPersonImg.readAsBytesSync(), dummyImageBytes);
+
+    // Verify CSV file content contains Maya SuperStar and PERSON record
+    String content = csvFile.readAsStringSync();
+    expect(content.contains('Maya SuperStar'), isTrue);
+    expect(content.contains('images/person_person_maya.png'), isTrue);
+
+    // EDIT the CSV directly as a user would in Excel or Notepad:
+    // Change Maya's name to "Maya The Explorer" and edit an activity title
+    content = content.replaceAll('Maya SuperStar', 'Maya The Explorer');
+    content = content.replaceAll('Wake-up Time', 'Jump Out of Bed');
+    csvFile.writeAsStringSync(content);
+
+    // Re-import from CSV
+    final success = await CsvStorageService.instance.importFromCsvFile(
+      filePath: csvFilePath,
+    );
+    expect(success, isTrue);
+
+    // Verify the changes are reflected in ScheduleService
+    final updatedMaya = ScheduleService.instance.persons.firstWhere((p) => p.id == 'person_maya');
+    expect(updatedMaya.name, 'Maya The Explorer');
+    expect(updatedMaya.customImageBase64, dummyBase64); // Image reloaded from images directory!
+
+    final mayaSundayItems = ScheduleService.instance.getScheduleForPerson('person_maya').getDay(0).items;
+    final hasRenamedActivity = mayaSundayItems.any((item) => item.title == 'Jump Out of Bed');
+    expect(hasRenamedActivity, isTrue);
+  });
+
+  test('CsvStorageService auto-saves edits when offline CSV mode is enabled', () async {
+    final tempDir = Directory.systemTemp.createTempSync('csv_autosave_');
+    addTearDown(() {
+      if (tempDir.existsSync()) {
+        try {
+          tempDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    });
+
+    final csvFilePath = '${tempDir.path}${Platform.pathSeparator}auto_schedule.csv';
+    await CsvStorageService.instance.exportToCsvFile(targetFilePath: csvFilePath);
+    await CsvStorageService.instance.setOfflineCsvMode(true);
+    await CsvStorageService.instance.setActiveCsvFilePath(csvFilePath);
+
+    ScheduleService.instance.onDataChanged = () {
+      CsvStorageService.instance.autoSaveIfOfflineMode();
+    };
+
+    // Add a new activity to Maya
+    final newActivity = ScheduleItem(
+      id: 'act_unique_12345',
+      title: 'Practice Piano',
+      time: '04:00 PM',
+      iconCodePoint: Icons.music_note.codePoint,
+      notes: 'Song 3',
+      isCompleted: false,
+      assignedPersonId: 'person_maya',
+    );
+    final currentSchedule = ScheduleService.instance.getScheduleForPerson('person_maya');
+    final mondayItems = List<ScheduleItem>.from(currentSchedule.getDay(1).items)..add(newActivity);
+    await ScheduleService.instance.savePersonDaySchedule('person_maya', 1, mondayItems);
+
+    // Verify auto-save immediately synced into the CSV file
+    final csvFile = File(csvFilePath);
+    expect(csvFile.readAsStringSync().contains('Practice Piano'), isTrue);
+  });
+
+  testWidgets('SettingsScreen displays Offline CSV Mode toggle, file status and options',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1000, 2000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SettingsScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify Offline CSV Mode section header and items
+    expect(find.text('Offline CSV Mode & Sync'), findsOneWidget);
+    expect(find.text('Offline CSV Mode'), findsOneWidget);
+    expect(find.text('Save and sync all data to a CSV file on your device'), findsOneWidget);
+
+    // Offline mode is initially disabled
+    expect(CsvStorageService.instance.isOfflineCsvModeEnabled, isFalse);
+
+    // Tap switch to enable
+    final switchFinder = find.byType(Switch).first;
+    await tester.tap(switchFinder);
+    await tester.pumpAndSettle();
+
+    expect(CsvStorageService.instance.isOfflineCsvModeEnabled, isTrue);
+
+    // Since it is enabled, action buttons appear
+    expect(find.text('Save / Export to CSV'), findsOneWidget);
+    expect(find.text('Choose / Upload CSV'), findsOneWidget);
   });
 }
