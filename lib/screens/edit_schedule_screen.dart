@@ -25,11 +25,13 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
   void initState() {
     super.initState();
     _activeDay = widget.initialDayOfWeek;
-    _selectedPersonId = widget.personId ??
-        ScheduleService.instance.activePersonId ??
-        (ScheduleService.instance.persons.isNotEmpty
-            ? ScheduleService.instance.persons.first.id
-            : null);
+    if (widget.personId != null) {
+      _selectedPersonId = widget.personId;
+    } else if (ScheduleService.instance.activePersonId != null) {
+      _selectedPersonId = ScheduleService.instance.activePersonId;
+    } else {
+      _selectedPersonId = null; // Family Shared
+    }
     _loadItemsForDay();
   }
 
@@ -42,7 +44,9 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
   Future<void> _saveChanges() async {
     await ScheduleService.instance.savePersonDaySchedule(_selectedPersonId, _activeDay, _items);
     if (mounted) {
-      final personName = ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid';
+      final personName = _selectedPersonId != null
+          ? (ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid')
+          : 'Family Shared';
       final dayName = ScheduleService.instance.getScheduleForPerson(_selectedPersonId).getDay(_activeDay).dayName;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -55,7 +59,9 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
   }
 
   void _confirmClearCurrentDay() {
-    final personName = ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid';
+    final personName = _selectedPersonId != null
+        ? (ScheduleService.instance.getPersonById(_selectedPersonId)?.name ?? 'Kid')
+        : 'Family Shared';
     final dayName = ScheduleService.instance.getScheduleForPerson(_selectedPersonId).getDay(_activeDay).dayName;
     showDialog(
       context: context,
@@ -542,56 +548,82 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
     );
   }
 
-  // Kid Selector Bar
+  // Person & Shared Selector Bar
   Widget _buildPersonSelectorBar() {
     final persons = ScheduleService.instance.persons;
-    if (persons.isEmpty) return const SizedBox.shrink();
 
     return Container(
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       child: Row(
         children: [
-          const Text('Kid:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
+          const Text('Profile:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.grey)),
           const SizedBox(width: 8),
           Expanded(
-            child: ListView.builder(
+            child: ListView(
               scrollDirection: Axis.horizontal,
-              itemCount: persons.length,
-              itemBuilder: (context, index) {
-                final p = persons[index];
-                final isSelected = _selectedPersonId == p.id;
-                return Padding(
+              children: [
+                // Shared Family chip
+                Padding(
                   padding: const EdgeInsets.only(right: 8.0),
                   child: ChoiceChip(
-                    avatar: Text(p.avatarEmoji, style: const TextStyle(fontSize: 14)),
-                    label: Text(p.name),
-                    selected: isSelected,
-                    selectedColor: p.color.withValues(alpha: 0.25),
+                    avatar: const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 14)),
+                    label: const Text('Family Shared'),
+                    selected: _selectedPersonId == null,
+                    selectedColor: Colors.indigo.withValues(alpha: 0.25),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: isSelected
-                          ? p.color
-                          : (Theme.of(context).brightness == Brightness.dark
-                              ? Colors.white
-                              : Colors.black87),
+                      color: _selectedPersonId == null
+                          ? Colors.indigo
+                          : (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87),
                     ),
                     side: BorderSide(
-                      color: isSelected ? p.color : Colors.grey.shade300,
-                      width: isSelected ? 2 : 1,
+                      color: _selectedPersonId == null ? Colors.indigo : Colors.grey.shade300,
+                      width: _selectedPersonId == null ? 2 : 1,
                     ),
                     onSelected: (val) {
                       if (val) {
                         setState(() {
-                          _selectedPersonId = p.id;
+                          _selectedPersonId = null;
                           _loadItemsForDay();
                         });
                       }
                     },
                   ),
-                );
-              },
+                ),
+                // Kids chips
+                ...persons.map((p) {
+                  final isSelected = _selectedPersonId == p.id;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 8.0),
+                    child: ChoiceChip(
+                      avatar: Text(p.avatarEmoji, style: const TextStyle(fontSize: 14)),
+                      label: Text(p.name),
+                      selected: isSelected,
+                      selectedColor: p.color.withValues(alpha: 0.25),
+                      labelStyle: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: isSelected
+                            ? p.color
+                            : (Theme.of(context).brightness == Brightness.dark ? Colors.white : Colors.black87),
+                      ),
+                      side: BorderSide(
+                        color: isSelected ? p.color : Colors.grey.shade300,
+                        width: isSelected ? 2 : 1,
+                      ),
+                      onSelected: (val) {
+                        if (val) {
+                          setState(() {
+                            _selectedPersonId = p.id;
+                            _loadItemsForDay();
+                          });
+                        }
+                      },
+                    ),
+                  );
+                }),
+              ],
             ),
           ),
         ],
@@ -615,16 +647,19 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
             if (currentPerson != null) ...[
               ImageUtils.buildPersonAvatar(currentPerson, size: 28, showGlow: false),
               const SizedBox(width: 8),
+            ] else ...[
+              const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
             ],
             Flexible(
               child: Text(
                 currentPerson != null
                     ? "Edit ${currentPerson.name}'s ${daySchedule.dayName}"
-                    : "Edit ${daySchedule.dayName}",
+                    : "Edit Family Shared ${daySchedule.dayName}",
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: currentPerson?.color,
+                  color: currentPerson?.color ?? Colors.indigo,
                 ),
               ),
             ),

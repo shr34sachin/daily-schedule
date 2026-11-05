@@ -580,4 +580,63 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('CSV Format & Columns'), findsNothing);
   });
+
+  testWidgets('Family & Shared Schedule shows unified timeline for all kids with badges and filter chips',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(const DailyScheduleApp());
+    await tester.pumpAndSettle();
+
+    // Verify Family & Shared Schedule card exists on front page
+    expect(find.text('Family & Shared Schedule'), findsOneWidget);
+
+    // Tap info button on front page
+    final infoButtonFinder = find.byTooltip('What is Family & Shared Schedule?').first;
+    await tester.tap(infoButtonFinder);
+    await tester.pumpAndSettle();
+
+    // Verify details dialog appears
+    expect(find.text('What is the Family & Shared Schedule?'), findsOneWidget);
+    expect(find.text('Got it!'), findsOneWidget);
+    await tester.tap(find.text('Got it!'));
+    await tester.pumpAndSettle();
+
+    // Tap Family & Shared Schedule to enter unified schedule screen
+    await tester.tap(find.text('Family & Shared Schedule'));
+    await tester.pumpAndSettle();
+
+    // Check AppBar title
+    expect(find.text('Family & Shared Schedule'), findsOneWidget);
+
+    // Check banner and filter chips
+    expect(find.text('Family Master Timeline: All kids & shared events unified'), findsOneWidget);
+    expect(find.textContaining('All Family'), findsOneWidget);
+    expect(find.textContaining('Shared Events'), findsOneWidget);
+
+    // Verify that items from multiple kids and shared events are present
+    expect(find.text('Family Breakfast'), findsWidgets);
+    expect(find.text('Wake-up Time'), findsWidgets);
+
+    // Tap Shared Events chip
+    await tester.tap(find.textContaining('Shared Events'));
+    await tester.pumpAndSettle();
+
+    // Should still have Family Breakfast, but kid-specific items filtered out
+    expect(find.text('Family Breakfast'), findsWidgets);
+    expect(find.text('Teeth Time'), findsNothing);
+
+    // Tap kid chip (e.g. Maya)
+    await tester.tap(find.textContaining('Maya'));
+    await tester.pumpAndSettle();
+
+    // Maya's routine should be shown
+    expect(find.text('Teeth Time'), findsWidgets);
+    expect(find.text('Family Breakfast'), findsNothing);
+  });
 }

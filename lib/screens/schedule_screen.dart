@@ -19,6 +19,67 @@ class ScheduleScreen extends StatefulWidget {
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
   late int _selectedDayOfWeek; // 0 = Sunday ... 6 = Saturday
+  String? _familyFilterPersonId; // null = All Family, 'shared' = Shared Only, or kid id
+
+  void _showFamilyScheduleInfoDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 24)),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Family & Shared Schedule',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: const SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'What does this screen show?',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.indigo),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  'This is your family\'s unified Master Dashboard. Instead of checking each child\'s schedule one by one, it combines all kids\' routines (Maya, Alex, Sam, etc.) plus shared family events into a single, chronological timeline.',
+                  style: TextStyle(fontSize: 13, height: 1.45),
+                ),
+                SizedBox(height: 12),
+                Text(
+                  'How it works:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  '• Chronological Timeline: All tasks for the selected day are ordered by time, so you can easily see what is next for everyone.\n'
+                  '• Kid Badges: Each card shows who it belongs to with their photo, emoji, and signature color (or "Family Shared").\n'
+                  '• Filter Anytime: Use the filter chips above to view all together, just shared events, or focus on a specific child.\n'
+                  '• Shared Family Events: Common activities like Family Breakfast, Dinner, or Park Time that apply to the whole family.\n'
+                  '• Synchronized Checkoffs: Tapping to complete any task here immediately updates that child\'s individual routine and progress!',
+                  style: TextStyle(fontSize: 12, height: 1.45),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it!'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -182,13 +243,15 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 setState(() {
                   item.isCompleted = true;
                 });
-                final currentPersonId = ScheduleService.instance.activePersonId;
-                await ScheduleService.instance.savePersonSchedule(currentPersonId);
-                final kid = ScheduleService.instance.activePerson;
+                final targetPersonId = item.assignedPersonId;
+                await ScheduleService.instance.savePersonSchedule(targetPersonId);
+                final kid = targetPersonId != null
+                    ? ScheduleService.instance.getPersonById(targetPersonId)
+                    : ScheduleService.instance.activePerson;
                 if (kid != null) {
                   _speak("Great job ${kid.name}! ${item.title} is done! ⭐");
                 } else {
-                  _speak("Great job! ${item.title} is done! ⭐");
+                  _speak("Great job family! ${item.title} is done! ⭐");
                 }
               },
               icon: const Icon(Icons.check_circle, size: 20),
@@ -230,8 +293,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               setState(() {
                 item.isCompleted = false;
               });
-              final currentPersonId = ScheduleService.instance.activePersonId;
-              await ScheduleService.instance.savePersonSchedule(currentPersonId);
+              final targetPersonId = item.assignedPersonId;
+              await ScheduleService.instance.savePersonSchedule(targetPersonId);
               _speak("${item.title} moved back to To Do.");
             },
             child: const Text('Move to To Do'),
@@ -351,13 +414,24 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         final now = DateTime.now();
         final greetingInfo = TimeOfDayGreetingInfo.getForTime(now);
         final activePerson = ScheduleService.instance.activePerson;
+        final isFamilyView = activePerson == null;
         final schedule = ScheduleService.instance.getScheduleForPerson(activePerson?.id);
         final daySchedule = schedule.getDay(_selectedDayOfWeek);
         final isToday = (now.weekday == 7 ? 0 : now.weekday) == _selectedDayOfWeek;
 
-        // Individual kid schedule items
-        final todoItems = daySchedule.items.where((e) => !e.isCompleted).toList();
-        final doneItems = daySchedule.items.where((e) => e.isCompleted).toList();
+        // Retrieve items for the day (Family Master View or individual routine)
+        final List<ScheduleItem> allDayItems;
+        if (isFamilyView) {
+          allDayItems = ScheduleService.instance.getItemsForFamilyView(
+            _selectedDayOfWeek,
+            filterPersonId: _familyFilterPersonId,
+          );
+        } else {
+          allDayItems = daySchedule.items;
+        }
+
+        final todoItems = allDayItems.where((e) => !e.isCompleted).toList();
+        final doneItems = allDayItems.where((e) => e.isCompleted).toList();
 
         return Scaffold(
           appBar: AppBar(
@@ -389,16 +463,37 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     ),
                   ),
                 ] else ...[
-                  const Text('Daily Schedule', overflow: TextOverflow.ellipsis),
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.indigo.withValues(alpha: 0.15),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 18)),
+                  ),
+                  const SizedBox(width: 8),
+                  const Flexible(
+                    child: Text(
+                      'Family & Shared Schedule',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo),
+                    ),
+                  ),
                 ],
               ],
             ),
             actions: [
+              if (isFamilyView)
+                IconButton(
+                  icon: const Icon(Icons.info_outline_rounded),
+                  tooltip: 'What is Family & Shared Schedule?',
+                  onPressed: _showFamilyScheduleInfoDialog,
+                ),
               TextButton.icon(
                 icon: const Icon(Icons.people_alt_outlined, size: 18),
                 label: const Text('Switch Kid', style: TextStyle(fontWeight: FontWeight.bold)),
                 style: TextButton.styleFrom(
-                  foregroundColor: activePerson?.color ?? theme.primaryColor,
+                  foregroundColor: activePerson?.color ?? Colors.indigo,
                 ),
                 onPressed: () {
                   if (Navigator.canPop(context)) {
@@ -507,9 +602,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   // 2. 7-DAY SELECTOR STRIP
                   _buildDaySelectorStrip(theme, now),
 
-                  // 3. TWO-COLUMN (TO DO & DONE) SCHEDULE BOARD
+                  // 3. FAMILY FILTER BANNER & CHIPS (IF IN FAMILY VIEW)
+                  if (isFamilyView) _buildFamilyFilterBanner(theme),
+
+                  // 4. TWO-COLUMN (TO DO & DONE) SCHEDULE BOARD
                   Expanded(
-                    child: daySchedule.items.isEmpty
+                    child: allDayItems.isEmpty
                         ? _buildEmptyScheduleView(daySchedule, activePerson)
                         : _buildTwoColumnBoard(todoItems, doneItems, theme),
                   ),
@@ -533,11 +631,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               });
             },
             icon: const Icon(Icons.add_task),
-            backgroundColor: activePerson?.color,
+            backgroundColor: activePerson?.color ?? Colors.indigo,
             label: Text(
               activePerson != null
                   ? 'Set ${activePerson.name}\'s ${daySchedule.shortDayName}'
-                  : 'Set ${daySchedule.shortDayName} Schedule',
+                  : 'Edit Shared Family Events',
             ),
           ),
         );
@@ -550,7 +648,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final timeStr = "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}";
     final greetingText = activePerson != null
         ? "${greeting.greeting}, ${activePerson.name}!"
-        : "${greeting.greeting}!";
+        : "${greeting.greeting}, Family!";
 
     return Container(
       width: double.infinity,
@@ -626,6 +724,113 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             onPressed: () {
               _speak("$greetingText It is currently ${greeting.phase.toLowerCase()}, time is $timeStr.");
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Family Master View Filter Strip & Banner
+  Widget _buildFamilyFilterBanner(ThemeData theme) {
+    final isDark = theme.brightness == Brightness.dark;
+    final persons = ScheduleService.instance.persons;
+    final allItemsCount = ScheduleService.instance.getItemsForFamilyView(_selectedDayOfWeek).length;
+    final sharedCount = ScheduleService.instance.getItemsForFamilyView(_selectedDayOfWeek, filterPersonId: 'shared').length;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 2, 16, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E232A) : Colors.indigo.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.grey.shade800 : Colors.indigo.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 16)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Family Master Timeline: All kids & shared events unified',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.indigo.shade200 : Colors.indigo.shade800,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.help_outline_rounded, size: 16),
+                tooltip: 'Details on Family & Shared Schedule',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: _showFamilyScheduleInfoDialog,
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: Text('All Family ($allItemsCount)'),
+                  selected: _familyFilterPersonId == null,
+                  onSelected: (val) {
+                    if (val) setState(() => _familyFilterPersonId = null);
+                  },
+                  selectedColor: Colors.indigo.withValues(alpha: 0.25),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _familyFilterPersonId == null ? Colors.indigo : null,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                ChoiceChip(
+                  avatar: const Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 12)),
+                  label: Text('Shared Events ($sharedCount)'),
+                  selected: _familyFilterPersonId == 'shared',
+                  onSelected: (val) {
+                    if (val) setState(() => _familyFilterPersonId = 'shared');
+                  },
+                  selectedColor: Colors.indigo.withValues(alpha: 0.25),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _familyFilterPersonId == 'shared' ? Colors.indigo : null,
+                  ),
+                ),
+                ...persons.map((p) {
+                  final kidCount = ScheduleService.instance
+                      .getItemsForFamilyView(_selectedDayOfWeek, filterPersonId: p.id)
+                      .length;
+                  final isSelected = _familyFilterPersonId == p.id;
+                  return Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: ChoiceChip(
+                      avatar: Text(p.avatarEmoji, style: const TextStyle(fontSize: 12)),
+                      label: Text('${p.name} ($kidCount)'),
+                      selected: isSelected,
+                      onSelected: (val) {
+                        if (val) setState(() => _familyFilterPersonId = p.id);
+                      },
+                      selectedColor: p.color.withValues(alpha: 0.25),
+                      labelStyle: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isSelected ? p.color : null,
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
           ),
         ],
       ),
@@ -968,6 +1173,29 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                   Text(
                                     assignedPerson.name,
                                     style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: assignedPerson.color),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        else if (ScheduleService.instance.activePerson == null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: Colors.indigo.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.indigo.withValues(alpha: 0.35)),
+                            ),
+                            child: const FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 10)),
+                                  SizedBox(width: 3),
+                                  Text(
+                                    'Shared',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.indigo),
                                   ),
                                 ],
                               ),

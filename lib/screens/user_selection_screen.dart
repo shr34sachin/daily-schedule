@@ -54,6 +54,65 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
     setState(() {});
   }
 
+  void _showFamilyScheduleInfoDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Text('👨‍👩‍👧‍👦', style: TextStyle(fontSize: 24)),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Family & Shared Schedule',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: const SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'What is the Family & Shared Schedule?',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.indigo),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'This is the Master Family Dashboard that brings together all children\'s individual routines and shared family events into a single, unified view.',
+                  style: TextStyle(fontSize: 13, height: 1.45),
+                ),
+                SizedBox(height: 14),
+                Text(
+                  'Key Features:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                SizedBox(height: 6),
+                Text(
+                  '• Combined Daily Timeline: View all tasks for all kids (Maya, Alex, Sam, etc.) plus family events sorted chronologically by time.\n'
+                  '• Distinct Kid Badges: Each task clearly displays who it belongs to with their photo, emoji, and signature color.\n'
+                  '• Shared Family Events: Common activities like Family Breakfast, Family Dinner, or Park Time that apply to everyone.\n'
+                  '• Quick Filter Chips: Easily switch between seeing everyone combined, only shared events, or focusing on one child.\n'
+                  '• Synchronized Checkoffs: Marking a task done here updates that child\'s schedule and awards praise!',
+                  style: TextStyle(fontSize: 12, height: 1.45),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it!'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showQuickAddKidDialog() {
     final nameController = TextEditingController();
     final roleController = TextEditingController(text: 'Kid');
@@ -834,7 +893,13 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                   ],
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.info_outline_rounded, size: 20, color: Colors.indigo),
+                tooltip: 'What is Family & Shared Schedule?',
+                onPressed: _showFamilyScheduleInfoDialog,
+              ),
+              const SizedBox(width: 2),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 decoration: BoxDecoration(

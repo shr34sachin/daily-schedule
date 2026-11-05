@@ -82,10 +82,17 @@ class ScheduleService extends ChangeNotifier {
       try {
         _sharedSchedule = WeeklySchedule.fromJson(jsonDecode(sharedJson));
       } catch (_) {
-        _sharedSchedule = WeeklySchedule.createDefault();
+        _sharedSchedule = _createInitialSharedSchedule();
+        await savePersonSchedule(null);
       }
     } else {
-      _sharedSchedule = WeeklySchedule.createDefault();
+      _sharedSchedule = _createInitialSharedSchedule();
+      await savePersonSchedule(null);
+    }
+
+    if (_sharedSchedule.days.values.every((d) => d.items.isEmpty)) {
+      _sharedSchedule = _createInitialSharedSchedule();
+      await savePersonSchedule(null);
     }
 
     // 4. Load or Migrate Individual Schedules for each person
@@ -251,13 +258,73 @@ class ScheduleService extends ChangeNotifier {
     return items.where((item) => item.assignedPersonId == targetId).toList();
   }
 
-  /// Count completed and total items for a day considering the specified person
+  /// Count completed and total items for a day considering the specified person.
+  /// If [personId] (or activePersonId) is null, calculates across the entire family (all kids + shared).
   ({int completed, int total}) getDayProgress(int dayIndex, {String? personId}) {
     final targetId = personId ?? activePersonId;
+    if (targetId == null) {
+      int completedCount = 0;
+      int totalCount = 0;
+      for (final person in persons) {
+        final pItems = getScheduleForPerson(person.id).getDay(dayIndex).items;
+        completedCount += pItems.where((i) => i.isCompleted).length;
+        totalCount += pItems.length;
+      }
+      final sharedItems = _sharedSchedule.getDay(dayIndex).items;
+      completedCount += sharedItems.where((i) => i.isCompleted).length;
+      totalCount += sharedItems.length;
+      return (completed: completedCount, total: totalCount);
+    }
+
     final schedule = getScheduleForPerson(targetId);
     final dayItems = schedule.getDay(dayIndex).items;
     final completedCount = dayItems.where((i) => i.isCompleted).length;
     return (completed: completedCount, total: dayItems.length);
+  }
+
+  /// Returns activities for the Family Master View for [dayIndex].
+  /// If [filterPersonId] is:
+  /// - null: combines all kids' activities + shared family events, sorted chronologically
+  /// - 'shared': returns only shared family events
+  /// - personId: returns only that specific kid's activities
+  List<ScheduleItem> getItemsForFamilyView(int dayIndex, {String? filterPersonId}) {
+    if (filterPersonId == 'shared') {
+      return List<ScheduleItem>.from(_sharedSchedule.getDay(dayIndex).items);
+    }
+    if (filterPersonId != null && filterPersonId.isNotEmpty) {
+      return List<ScheduleItem>.from(getScheduleForPerson(filterPersonId).getDay(dayIndex).items);
+    }
+
+    final List<ScheduleItem> combined = [];
+    combined.addAll(_sharedSchedule.getDay(dayIndex).items);
+    for (final person in persons) {
+      combined.addAll(getScheduleForPerson(person.id).getDay(dayIndex).items);
+    }
+
+    combined.sort((a, b) => _compareTimeString(a.time, b.time));
+    return combined;
+  }
+
+  static int _timeToMinutes(String timeStr) {
+    if (timeStr.isEmpty) return 9999;
+    try {
+      final parts = timeStr.trim().split(' ');
+      final timeParts = parts[0].split(':');
+      int h = int.parse(timeParts[0]);
+      int m = timeParts.length > 1 ? int.parse(timeParts[1]) : 0;
+      if (parts.length > 1) {
+        final ampm = parts[1].toUpperCase();
+        if (ampm == 'PM' && h < 12) h += 12;
+        if (ampm == 'AM' && h == 12) h = 0;
+      }
+      return h * 60 + m;
+    } catch (_) {
+      return 9999;
+    }
+  }
+
+  static int _compareTimeString(String a, String b) {
+    return _timeToMinutes(a).compareTo(_timeToMinutes(b));
   }
 
   /// Clones a day's schedule to another target day for a specific person
@@ -383,6 +450,52 @@ class ScheduleService extends ChangeNotifier {
       );
     }
 
+    return schedule;
+  }
+
+  /// Creates initial default activities for Family Shared schedule across 7 days
+  WeeklySchedule _createInitialSharedSchedule() {
+    final schedule = WeeklySchedule.createDefault();
+
+    final List<({String title, String time})> sharedEvents = [
+      (title: 'Family Breakfast', time: '08:00 AM'),
+      (title: 'Family Lunch', time: '12:30 PM'),
+      (title: 'Family Dinner', time: '06:30 PM'),
+      (title: 'Tidy Up Living Area', time: '07:30 PM'),
+      (title: 'Family Story Time', time: '08:45 PM'),
+    ];
+
+    for (int day = 0; day < 7; day++) {
+      final List<ScheduleItem> dayItems = [];
+      for (int i = 0; i < sharedEvents.length; i++) {
+        final ev = sharedEvents[i];
+        dayItems.add(
+          ScheduleItem(
+            id: 'shared_${day}_$i',
+            title: ev.title,
+            time: ev.time,
+            iconCodePoint: SchedulePresets.getIconForLabel(ev.title).codePoint,
+            isCompleted: false,
+            assignedPersonId: null,
+          ),
+        );
+      }
+      // Weekend extra activity: Saturday & Sunday
+      if (day == 0 || day == 6) {
+        dayItems.insert(
+          3,
+          ScheduleItem(
+            id: 'shared_${day}_outing',
+            title: 'Family Park & Outdoor Time',
+            time: '03:30 PM',
+            iconCodePoint: SchedulePresets.getIconForLabel('Outdoor Time').codePoint,
+            isCompleted: false,
+            assignedPersonId: null,
+          ),
+        );
+      }
+      schedule.days[day] = DaySchedule(dayOfWeek: day, items: dayItems);
+    }
     return schedule;
   }
 }
