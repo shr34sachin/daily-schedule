@@ -562,5 +562,22 @@ void main() {
     // Since it is enabled, action buttons appear
     expect(find.text('Save / Export to CSV'), findsOneWidget);
     expect(find.text('Choose / Upload CSV'), findsOneWidget);
+
+    // Tap View CSV Format & Column Details button
+    final viewFormatBtn = find.text('View CSV Format & Column Details');
+    expect(viewFormatBtn, findsOneWidget);
+    await tester.tap(viewFormatBtn);
+    await tester.pumpAndSettle();
+
+    // Verify dialog opens with format details
+    expect(find.text('CSV Format & Columns'), findsOneWidget);
+    expect(find.text('CSV Header Columns:'), findsOneWidget);
+    expect(find.text('1. Profile Row (PERSON):'), findsOneWidget);
+    expect(find.text('2. Activity Row (ACTIVITY):'), findsOneWidget);
+
+    // Close dialog
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('CSV Format & Columns'), findsNothing);
   });
 }

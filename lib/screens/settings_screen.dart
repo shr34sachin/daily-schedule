@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../services/csv_storage_service.dart';
 import '../services/settings_service.dart';
@@ -578,7 +579,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         SnackBar(
                                           content: Text(
                                             path != null
-                                                ? 'Saved all routines & images to CSV!'
+                                                ? (kIsWeb
+                                                    ? 'CSV file downloaded successfully! Check your browser downloads.'
+                                                    : 'Saved all routines & images to CSV!')
                                                 : 'Export cancelled.',
                                           ),
                                           backgroundColor: path != null ? Colors.teal.shade700 : null,
@@ -592,7 +595,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                   ),
                                 ),
-                                if (csvService.activeCsvFilePath != null)
+                                if (!kIsWeb && csvService.activeCsvFilePath != null)
                                   OutlinedButton.icon(
                                     onPressed: () async {
                                       final success = await csvService.reloadFromActiveCsv();
@@ -647,6 +650,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                     '• Open the CSV in Excel, Notepad, or Google Sheets to add or edit activities, change times, or mark tasks done.\n'
                                     '• When you save your edits in Excel, tap "Sync Edits Now" or restart the app to immediately see the changes reflected!',
                                     style: TextStyle(fontSize: 12, height: 1.45, color: isDark ? Colors.grey.shade300 : Colors.grey.shade700),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  OutlinedButton.icon(
+                                    onPressed: () => _showCsvFormatDialog(context, isDark),
+                                    icon: const Icon(Icons.table_chart_rounded, size: 16),
+                                    label: const Text('View CSV Format & Column Details'),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.blue.shade700,
+                                      side: BorderSide(color: Colors.blue.withValues(alpha: 0.4)),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -754,6 +768,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showCsvFormatDialog(BuildContext context, bool isDark) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.table_chart_rounded, color: Colors.teal),
+            SizedBox(width: 8),
+            Text('CSV Format & Columns', style: TextStyle(fontSize: 18)),
+          ],
+        ),
+        content: SizedBox(
+          width: 580,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'The CSV contains both kid profiles and weekly activities. You can open and edit this file in Microsoft Excel, VS Code, or Notepad.',
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'CSV Header Columns:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+                  ),
+                  child: const SelectableText(
+                    'record_type,day,person_id,person_name,person_role,person_color,person_emoji,person_image,activity_id,activity_title,time,notes,is_completed,activity_image',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 11),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  '1. Profile Row (PERSON):',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.purple),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const SelectableText(
+                    'PERSON,,person_maya,Maya,Big Sister,#FF9C27B0,👧,images/person_maya.png,,,,,,',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 11),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  '2. Activity Row (ACTIVITY):',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.teal),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.grey.shade900 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const SelectableText(
+                    'ACTIVITY,Sunday,person_maya,Maya,,,,,act_101,Brush Teeth,07:30 AM,Morning routine,FALSE,images/activity_101.png',
+                    style: TextStyle(fontFamily: 'monospace', fontSize: 11),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Key Rules for Editing:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  '• day: Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday\n'
+                  '• is_completed: TRUE or FALSE\n'
+                  '• person_image & activity_image: relative path to image file in the images/ directory next to this CSV\n'
+                  '• To add a new person, add a PERSON row or enter their name in an ACTIVITY row.',
+                  style: TextStyle(fontSize: 12, height: 1.4),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }

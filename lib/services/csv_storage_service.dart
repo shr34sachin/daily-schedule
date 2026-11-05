@@ -46,7 +46,7 @@ class CsvStorageService extends ChangeNotifier {
     }
 
     // If offline mode is enabled and an active file exists, automatically reload it
-    if (_isOfflineCsvModeEnabled && _activeCsvFilePath != null) {
+    if (!kIsWeb && _isOfflineCsvModeEnabled && _activeCsvFilePath != null) {
       final file = File(_activeCsvFilePath!);
       if (file.existsSync()) {
         try {
@@ -67,7 +67,7 @@ class CsvStorageService extends ChangeNotifier {
     await prefs.setBool(_keyOfflineMode, enabled);
 
     // If turned on and an active CSV path exists, sync from it
-    if (enabled && _activeCsvFilePath != null && File(_activeCsvFilePath!).existsSync()) {
+    if (!kIsWeb && enabled && _activeCsvFilePath != null && File(_activeCsvFilePath!).existsSync()) {
       await reloadFromActiveCsv();
     }
   }
@@ -101,48 +101,8 @@ class CsvStorageService extends ChangeNotifier {
   /// Exports all current profiles, weekly routines, and images to a CSV file.
   /// If [targetFilePath] is null, opens file picker or uses default documents folder.
   Future<String?> exportToCsvFile({String? targetFilePath}) async {
-    String? path = targetFilePath;
-
-    if (path == null) {
-      try {
-        final uri = await FilePicker.saveFile(
-          dialogTitle: 'Select location to save Schedule CSV',
-          fileName: 'daily_schedule.csv',
-          bytes: Uint8List(0),
-        );
-        if (uri != null) {
-          path = uri.isScheme('file') ? uri.toFilePath() : uri.path;
-        }
-      } catch (e) {
-        debugPrint('FilePicker saveFile error/fallback: $e');
-      }
-
-      if (path == null) {
-        // Fallback to application documents folder
-        try {
-          final dir = await getApplicationDocumentsDirectory();
-          path = '${dir.path}${Platform.pathSeparator}daily_schedule.csv';
-        } catch (_) {
-          return null;
-        }
-      }
-    }
-
-    if (!path.toLowerCase().endsWith('.csv')) {
-      path = '$path.csv';
-    }
-
-    final csvFile = File(path);
-    final csvDir = csvFile.parent;
-    if (!csvDir.existsSync()) {
-      csvDir.createSync(recursive: true);
-    }
-
-    // Images directory alongside the CSV file: [csvDir]/images/
-    final imagesDir = Directory('${csvDir.path}${Platform.pathSeparator}images');
-    if (!imagesDir.existsSync()) {
-      imagesDir.createSync(recursive: true);
-    }
+    final scheduleService = ScheduleService.instance;
+    final persons = scheduleService.persons;
 
     final List<List<dynamic>> rows = [];
 
@@ -164,22 +124,12 @@ class CsvStorageService extends ChangeNotifier {
       'activity_image',
     ]);
 
-    final scheduleService = ScheduleService.instance;
-    final persons = scheduleService.persons;
-
     // 1. Export Persons
     for (final person in persons) {
       String personImageRelative = '';
       if (person.hasCustomImage) {
-        try {
-          final imageBytes = base64Decode(person.customImageBase64);
-          final safeName = 'person_${person.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
-          final imageFile = File('${imagesDir.path}${Platform.pathSeparator}$safeName');
-          imageFile.writeAsBytesSync(imageBytes);
-          personImageRelative = 'images/$safeName';
-        } catch (e) {
-          debugPrint('Error saving person image: $e');
-        }
+        final safeName = 'person_${person.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
+        personImageRelative = 'images/$safeName';
       }
 
       rows.add([
@@ -210,15 +160,8 @@ class CsvStorageService extends ChangeNotifier {
         for (final item in daySchedule.items) {
           String activityImageRelative = '';
           if (item.customImageBase64.isNotEmpty) {
-            try {
-              final imageBytes = base64Decode(item.customImageBase64);
-              final safeName = 'activity_${item.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
-              final imageFile = File('${imagesDir.path}${Platform.pathSeparator}$safeName');
-              imageFile.writeAsBytesSync(imageBytes);
-              activityImageRelative = 'images/$safeName';
-            } catch (e) {
-              debugPrint('Error saving activity image: $e');
-            }
+            final safeName = 'activity_${item.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
+            activityImageRelative = 'images/$safeName';
           }
 
           rows.add([
@@ -250,15 +193,8 @@ class CsvStorageService extends ChangeNotifier {
       for (final item in daySchedule.items) {
         String activityImageRelative = '';
         if (item.customImageBase64.isNotEmpty) {
-          try {
-            final imageBytes = base64Decode(item.customImageBase64);
-            final safeName = 'activity_${item.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
-            final imageFile = File('${imagesDir.path}${Platform.pathSeparator}$safeName');
-            imageFile.writeAsBytesSync(imageBytes);
-            activityImageRelative = 'images/$safeName';
-          } catch (e) {
-            debugPrint('Error saving activity image: $e');
-          }
+          final safeName = 'activity_${item.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
+          activityImageRelative = 'images/$safeName';
         }
 
         rows.add([
@@ -280,8 +216,118 @@ class CsvStorageService extends ChangeNotifier {
       }
     }
 
-    // Write CSV content
+    // Encode CSV string and bytes
     final csvString = Csv().encode(rows);
+    final csvBytes = Uint8List.fromList(utf8.encode(csvString));
+
+    if (kIsWeb) {
+      try {
+        await FilePicker.saveFile(
+          dialogTitle: 'Save Schedule CSV',
+          fileName: 'daily_schedule.csv',
+          bytes: csvBytes,
+          mimeType: 'text/csv',
+        );
+        await setActiveCsvFilePath('daily_schedule.csv');
+        await _updateLastSync();
+        return 'daily_schedule.csv';
+      } catch (e) {
+        debugPrint('Web FilePicker saveFile error: $e');
+        return null;
+      }
+    }
+
+    // Non-Web (Desktop & Mobile)
+    String? path = targetFilePath;
+
+    if (path == null) {
+      bool userCancelled = false;
+      try {
+        final uri = await FilePicker.saveFile(
+          dialogTitle: 'Select location to save Schedule CSV',
+          fileName: 'daily_schedule.csv',
+          bytes: csvBytes,
+          mimeType: 'text/csv',
+        );
+        if (uri != null) {
+          path = uri.isScheme('file') ? uri.toFilePath() : uri.path;
+        } else {
+          userCancelled = true;
+        }
+      } catch (e) {
+        debugPrint('FilePicker saveFile error/fallback: $e');
+      }
+
+      if (userCancelled) {
+        return null;
+      }
+
+      if (path == null) {
+        try {
+          final dir = await getApplicationDocumentsDirectory();
+          path = '${dir.path}${Platform.pathSeparator}daily_schedule.csv';
+        } catch (_) {
+          return null;
+        }
+      }
+    }
+
+    if (!path.toLowerCase().endsWith('.csv')) {
+      path = '$path.csv';
+    }
+
+    final csvFile = File(path);
+    final csvDir = csvFile.parent;
+    if (!csvDir.existsSync()) {
+      csvDir.createSync(recursive: true);
+    }
+
+    // Images directory alongside the CSV file: [csvDir]/images/
+    final imagesDir = Directory('${csvDir.path}${Platform.pathSeparator}images');
+    if (!imagesDir.existsSync()) {
+      imagesDir.createSync(recursive: true);
+    }
+
+    // Save Person images to imagesDir
+    for (final person in persons) {
+      if (person.hasCustomImage) {
+        try {
+          final imageBytes = base64Decode(person.customImageBase64);
+          final safeName = 'person_${person.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
+          final imageFile = File('${imagesDir.path}${Platform.pathSeparator}$safeName');
+          imageFile.writeAsBytesSync(imageBytes);
+        } catch (e) {
+          debugPrint('Error saving person image: $e');
+        }
+      }
+    }
+
+    // Save Activity images to imagesDir
+    void writeItemImages(List<ScheduleItem> items) {
+      for (final item in items) {
+        if (item.customImageBase64.isNotEmpty) {
+          try {
+            final imageBytes = base64Decode(item.customImageBase64);
+            final safeName = 'activity_${item.id.replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')}.png';
+            final imageFile = File('${imagesDir.path}${Platform.pathSeparator}$safeName');
+            imageFile.writeAsBytesSync(imageBytes);
+          } catch (e) {
+            debugPrint('Error saving activity image: $e');
+          }
+        }
+      }
+    }
+
+    for (final person in persons) {
+      final schedule = scheduleService.getScheduleForPerson(person.id);
+      for (int day = 0; day < 7; day++) {
+        writeItemImages(schedule.getDay(day).items);
+      }
+    }
+    for (int day = 0; day < 7; day++) {
+      writeItemImages(sharedSchedule.getDay(day).items);
+    }
+
     csvFile.writeAsStringSync(csvString);
 
     await setActiveCsvFilePath(path);
@@ -298,31 +344,60 @@ class CsvStorageService extends ChangeNotifier {
   /// If [filePath] is null, opens file picker dialog.
   Future<bool> importFromCsvFile({String? filePath}) async {
     String? path = filePath;
+    String content = '';
+    Directory? csvDir;
 
-    if (path == null) {
+    if (kIsWeb) {
       try {
         final result = await FilePicker.pickFile(
           type: FileType.custom,
           allowedExtensions: ['csv'],
           dialogTitle: 'Select Schedule CSV to Import',
         );
-        if (result != null && result.path != null) {
-          path = result.path;
+        if (result != null) {
+          final bytes = await result.readAsBytes();
+          if (bytes.isNotEmpty) {
+            content = utf8.decode(bytes);
+            path = result.name;
+          }
         }
       } catch (e) {
-        debugPrint('FilePicker pickFile error: $e');
+        debugPrint('Web FilePicker pickFile error: $e');
+      }
+    } else {
+      if (path == null) {
+        try {
+          final result = await FilePicker.pickFile(
+            type: FileType.custom,
+            allowedExtensions: ['csv'],
+            dialogTitle: 'Select Schedule CSV to Import',
+          );
+          if (result != null) {
+            path = result.path;
+            if (path == null) {
+              final bytes = await result.readAsBytes();
+              if (bytes.isNotEmpty) {
+                content = utf8.decode(bytes);
+                path = result.name;
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('FilePicker pickFile error: $e');
+        }
+      }
+
+      if (path == null) return false;
+
+      if (content.isEmpty) {
+        final file = File(path);
+        if (!file.existsSync()) return false;
+        content = file.readAsStringSync();
+        csvDir = file.parent;
       }
     }
 
-    if (path == null) return false;
-
-    final file = File(path);
-    if (!file.existsSync()) return false;
-
-    final content = file.readAsStringSync();
     if (content.trim().isEmpty) return false;
-
-    final csvDir = file.parent;
 
     // Parse CSV
     final List<List<dynamic>> rows = Csv(
@@ -383,7 +458,7 @@ class CsvStorageService extends ChangeNotifier {
         // Load custom image if present at CSV directory
         String imageBase64 = '';
         final imagePathRel = getCol(row, idxPersonImage);
-        if (imagePathRel.isNotEmpty) {
+        if (!kIsWeb && csvDir != null && imagePathRel.isNotEmpty) {
           final imgFile = File('${csvDir.path}${Platform.pathSeparator}$imagePathRel');
           if (imgFile.existsSync()) {
             try {
@@ -470,7 +545,7 @@ class CsvStorageService extends ChangeNotifier {
       // Load custom activity image if present
       String activityImageBase64 = '';
       final actImgRel = getCol(row, idxActivityImage);
-      if (actImgRel.isNotEmpty) {
+      if (!kIsWeb && csvDir != null && actImgRel.isNotEmpty) {
         final imgFile = File('${csvDir.path}${Platform.pathSeparator}$actImgRel');
         if (imgFile.existsSync()) {
           try {
@@ -517,7 +592,7 @@ class CsvStorageService extends ChangeNotifier {
 
   /// Re-syncs from the active CSV file (reflects external edits in Excel/Notepad)
   Future<bool> reloadFromActiveCsv() async {
-    if (_activeCsvFilePath == null) return false;
+    if (kIsWeb || _activeCsvFilePath == null) return false;
     final file = File(_activeCsvFilePath!);
     if (!file.existsSync()) return false;
     return await importFromCsvFile(filePath: _activeCsvFilePath!);
@@ -525,7 +600,7 @@ class CsvStorageService extends ChangeNotifier {
 
   /// Automatically called after schedule modifications if Offline CSV Mode is active
   Future<void> autoSaveIfOfflineMode() async {
-    if (!_isOfflineCsvModeEnabled || _activeCsvFilePath == null) return;
+    if (kIsWeb || !_isOfflineCsvModeEnabled || _activeCsvFilePath == null) return;
     try {
       await exportToCsvFile(targetFilePath: _activeCsvFilePath);
     } catch (e) {
