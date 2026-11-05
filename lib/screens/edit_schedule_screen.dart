@@ -127,6 +127,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                 ? customTitleController.text.trim()
                 : selectedTitle;
             final currentPresetColor = SchedulePresets.getColorForLabel(currentTitle);
+            final isDark = Theme.of(context).brightness == Brightness.dark;
 
             return Padding(
               padding: EdgeInsets.only(
@@ -371,7 +372,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: isDark ? const Color(0xFF1E2228) : Colors.white,
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(color: Colors.blue.shade400, width: 1.5),
                                 ),
@@ -570,7 +571,11 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                     selectedColor: p.color.withValues(alpha: 0.25),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.bold,
-                      color: isSelected ? p.color : Colors.black87,
+                      color: isSelected
+                          ? p.color
+                          : (Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white
+                              : Colors.black87),
                     ),
                     side: BorderSide(
                       color: isSelected ? p.color : Colors.grey.shade300,
@@ -833,10 +838,15 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
       bottomNavigationBar: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isDark ? const Color(0xFF1E2228) : Colors.white,
+          border: Border(
+            top: BorderSide(
+              color: isDark ? const Color(0xFF2C323D) : Colors.grey.shade200,
+            ),
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
               blurRadius: 6,
               offset: const Offset(0, -2),
             ),

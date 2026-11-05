@@ -1,13 +1,14 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import '../models/person_model.dart';
 import '../models/schedule_model.dart';
 import '../services/schedule_service.dart';
+import '../services/settings_service.dart';
 import '../utils/image_utils.dart';
 import 'schedule_screen.dart';
 import 'person_management_screen.dart';
 import 'edit_schedule_screen.dart';
+import 'settings_screen.dart';
 
 class UserSelectionScreen extends StatefulWidget {
   const UserSelectionScreen({super.key});
@@ -17,33 +18,14 @@ class UserSelectionScreen extends StatefulWidget {
 }
 
 class _UserSelectionScreenState extends State<UserSelectionScreen> {
-  final FlutterTts _flutterTts = FlutterTts();
-
-  @override
-  void initState() {
-    super.initState();
-    _initTts();
-  }
-
-  Future<void> _initTts() async {
-    try {
-      await _flutterTts.setSpeechRate(0.48);
-      await _flutterTts.setVolume(1.0);
-      await _flutterTts.setPitch(1.05); // Friendly pitch for kids
-      await _flutterTts.setLanguage("en-US");
-    } catch (_) {}
-  }
-
   @override
   void dispose() {
-    _flutterTts.stop();
+    SettingsService.instance.stop();
     super.dispose();
   }
 
-  void _speak(String text) async {
-    try {
-      await _flutterTts.speak(text);
-    } catch (_) {}
+  void _speak(String text) {
+    SettingsService.instance.speak(text);
   }
 
   void _onKidSelected(Person kid) async {
@@ -295,21 +277,26 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
         final currentDayIndex = now.weekday == 7 ? 0 : now.weekday;
         final greetingInfo = TimeOfDayGreetingInfo.getForTime(now);
 
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+
         return Scaffold(
-          backgroundColor: const Color(0xFFF3F6FD),
           appBar: AppBar(
             backgroundColor: Colors.transparent,
             elevation: 0,
-            title: const Row(
+            title: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.calendar_month_rounded, color: Color(0xFF1976D2), size: 24),
-                SizedBox(width: 6),
+                const Icon(Icons.calendar_month_rounded, color: Color(0xFF1976D2), size: 24),
+                const SizedBox(width: 6),
                 Flexible(
                   child: Text(
                     'Daily Schedule',
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF1A237E)),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
+                      color: isDark ? Colors.white : const Color(0xFF1A237E),
+                    ),
                   ),
                 ),
               ],
@@ -321,6 +308,15 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                 onPressed: () {
                   _speak("Welcome to your Daily Schedule! Tap your picture to see what's in your schedule today!");
                 },
+              ),
+              IconButton(
+                icon: Icon(
+                  isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                  color: isDark ? Colors.amber : const Color(0xFF455A64),
+                  size: 22,
+                ),
+                tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                onPressed: () => SettingsService.instance.toggleTheme(context),
               ),
               IconButton(
                 icon: const Icon(Icons.manage_accounts_rounded, color: Color(0xFF455A64), size: 22),
@@ -347,6 +343,16 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                     ),
                   );
                   setState(() {});
+                },
+              ),
+              IconButton(
+                icon: const Icon(Icons.settings_outlined, color: Color(0xFF455A64), size: 22),
+                tooltip: 'Audio & Theme Settings',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                  );
                 },
               ),
             ],
@@ -379,13 +385,13 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                             child: const Text('👉', style: TextStyle(fontSize: 14)),
                           ),
                           const SizedBox(width: 8),
-                          const Expanded(
+                          Expanded(
                             child: Text(
                               'Tap your picture to check your schedule:',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w700,
-                                color: Color(0xFF263238),
+                                color: isDark ? Colors.white70 : const Color(0xFF263238),
                               ),
                             ),
                           ),
@@ -599,6 +605,8 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
     final isAllDone = progress.total > 0 && progress.completed == progress.total;
     final percent = progress.total > 0 ? progress.completed / progress.total : 0.0;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Card(
       elevation: 2.5,
       shadowColor: kid.color.withValues(alpha: 0.25),
@@ -606,7 +614,7 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
         borderRadius: BorderRadius.circular(20),
         side: BorderSide(color: kid.color.withValues(alpha: 0.40), width: 1.8),
       ),
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       child: InkWell(
         onTap: () => _onKidSelected(kid),
         borderRadius: BorderRadius.circular(20),
@@ -660,7 +668,7 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                               style: TextStyle(
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
-                                color: isAllDone ? Colors.green.shade700 : Colors.grey.shade800,
+                                color: isAllDone ? Colors.green.shade700 : (isDark ? Colors.grey.shade300 : Colors.grey.shade800),
                               ),
                             ),
                           ] else ...[
@@ -731,7 +739,7 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: isAllDone ? Colors.green.shade700 : Colors.grey.shade800,
+                            color: isAllDone ? Colors.green.shade700 : (isDark ? Colors.grey.shade300 : Colors.grey.shade800),
                           ),
                         ),
                       ] else ...[
@@ -779,14 +787,15 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
   // Shared Family Schedule Card
   Widget _buildSharedScheduleCard(int currentDayIndex) {
     final progress = ScheduleService.instance.getDayProgress(currentDayIndex, personId: null);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Card(
       elevation: 2,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: Colors.blueGrey.shade200),
+        side: BorderSide(color: isDark ? const Color(0xFF2C323D) : Colors.blueGrey.shade200),
       ),
-      color: Colors.white,
+      color: Theme.of(context).cardColor,
       child: InkWell(
         onTap: _onSharedScheduleSelected,
         borderRadius: BorderRadius.circular(18),
@@ -809,9 +818,13 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Family & Shared Schedule',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF263238)),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF263238),
+                      ),
                     ),
                     const SizedBox(height: 2),
                     Text(

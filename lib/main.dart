@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:daily_schedule/screens/user_selection_screen.dart';
-import 'package:daily_schedule/services/schedule_service.dart';
+import 'screens/user_selection_screen.dart';
+import 'services/schedule_service.dart';
+import 'services/settings_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ScheduleService.instance.init();
+  await SettingsService.instance.init();
   runApp(const DailyScheduleApp());
 }
 
@@ -13,32 +15,96 @@ class DailyScheduleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Daily Schedule',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1E88E5), // Blue accent theme
-          primary: const Color(0xFF1976D2),
-          secondary: const Color(0xFF43A047),
-          surface: const Color(0xFFF6F8FC),
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF6F8FC),
-        appBarTheme: const AppBarTheme(
-          elevation: 0,
-          scrolledUnderElevation: 1,
-          centerTitle: false,
-        ),
-        cardTheme: CardThemeData(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: Colors.grey.shade200),
-          ),
+    return ListenableBuilder(
+      listenable: SettingsService.instance,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'Daily Schedule',
+          debugShowCheckedModeBanner: false,
+          themeMode: SettingsService.instance.themeMode,
+          theme: _buildLightTheme(),
+          darkTheme: _buildDarkTheme(),
+          home: const UserSelectionScreen(),
+        );
+      },
+    );
+  }
+
+  ThemeData _buildLightTheme() {
+    final baseColorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF1E88E5),
+      brightness: Brightness.light,
+      primary: const Color(0xFF1976D2),
+      secondary: const Color(0xFF43A047),
+      surface: const Color(0xFFFFFFFF),
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
+      colorScheme: baseColorScheme,
+      scaffoldBackgroundColor: const Color(0xFFF6F8FC),
+      cardColor: Colors.white,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        centerTitle: false,
+        iconTheme: IconThemeData(color: Color(0xFF263238)),
+        titleTextStyle: TextStyle(
+          color: Color(0xFF1A237E),
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
         ),
       ),
-      home: const UserSelectionScreen(),
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: Colors.grey.shade200),
+        ),
+      ),
+      dividerColor: Colors.grey.shade200,
+    );
+  }
+
+  ThemeData _buildDarkTheme() {
+    final baseColorScheme = ColorScheme.fromSeed(
+      seedColor: const Color(0xFF42A5F5),
+      brightness: Brightness.dark,
+      primary: const Color(0xFF42A5F5),
+      secondary: const Color(0xFF66BB6A),
+      surface: const Color(0xFF1E2228),
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: baseColorScheme,
+      scaffoldBackgroundColor: const Color(0xFF121418),
+      cardColor: const Color(0xFF1E2228),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        centerTitle: false,
+        iconTheme: IconThemeData(color: Colors.white),
+        titleTextStyle: TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: const Color(0xFF1E2228),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFF2C323D)),
+        ),
+      ),
+      dividerColor: const Color(0xFF2C323D),
     );
   }
 }

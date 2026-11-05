@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
 import '../models/person_model.dart';
 import '../models/schedule_model.dart';
 import '../services/schedule_service.dart';
+import '../services/settings_service.dart';
 import '../utils/image_utils.dart';
 import 'edit_schedule_screen.dart';
 import 'person_management_screen.dart';
+import 'settings_screen.dart';
 import 'user_selection_screen.dart';
 
 class ScheduleScreen extends StatefulWidget {
@@ -17,7 +18,6 @@ class ScheduleScreen extends StatefulWidget {
 }
 
 class _ScheduleScreenState extends State<ScheduleScreen> {
-  final FlutterTts _flutterTts = FlutterTts();
   late int _selectedDayOfWeek; // 0 = Sunday ... 6 = Saturday
 
   @override
@@ -28,29 +28,17 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
     final now = DateTime.now();
     _selectedDayOfWeek = now.weekday == 7 ? 0 : now.weekday;
-    _initTts();
     _checkTimeShift();
-  }
-
-  Future<void> _initTts() async {
-    try {
-      await _flutterTts.setSpeechRate(0.45);
-      await _flutterTts.setVolume(1.0);
-      await _flutterTts.setPitch(1.0);
-      await _flutterTts.setLanguage("en-US");
-    } catch (_) {}
   }
 
   @override
   void dispose() {
-    _flutterTts.stop();
+    SettingsService.instance.stop();
     super.dispose();
   }
 
-  void _speak(String text) async {
-    try {
-      await _flutterTts.speak(text);
-    } catch (_) {}
+  void _speak(String text) {
+    SettingsService.instance.speak(text);
   }
 
   void _checkTimeShift() {
@@ -153,12 +141,20 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade200,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? const Color(0xFF2C323D)
+                          : Colors.grey.shade200,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       item.time,
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade800, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Colors.grey.shade300
+                            : Colors.grey.shade800,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -416,6 +412,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 },
               ),
               IconButton(
+                icon: Icon(
+                  theme.brightness == Brightness.dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                  color: theme.brightness == Brightness.dark ? Colors.amber : null,
+                ),
+                tooltip: theme.brightness == Brightness.dark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                onPressed: () => SettingsService.instance.toggleTheme(context),
+              ),
+              IconButton(
                 icon: const Icon(Icons.manage_accounts_outlined),
                 tooltip: 'Manage Persons',
                 onPressed: () async {
@@ -444,10 +448,26 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                   });
                 },
               ),
+              IconButton(
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Settings & Voice Options',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                  );
+                },
+              ),
               PopupMenuButton<String>(
                 icon: const Icon(Icons.more_vert),
                 tooltip: 'More options',
                 onSelected: (val) {
+                  if (val == 'settings') {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const SettingsScreen()),
+                    );
+                  }
                   if (val == 'copy') _showCopyDialog();
                   if (val == 'clear_day') {
                     ScheduleService.instance.clearDay(_selectedDayOfWeek, personId: activePerson?.id);
@@ -466,6 +486,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                 },
                 itemBuilder: (context) => [
                   const PopupMenuItem(value: 'manage_people', child: Text('Manage People / Profiles')),
+                  const PopupMenuItem(value: 'settings', child: Text('Audio & Theme Settings')),
                   const PopupMenuDivider(),
                   const PopupMenuItem(value: 'copy', child: Text('Copy Schedule to Another Day')),
                   const PopupMenuDivider(),
@@ -661,7 +682,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.white : (isCurrentToday ? theme.primaryColor : Colors.black87),
+                            color: isSelected
+                                ? Colors.white
+                                : (isCurrentToday
+                                    ? theme.primaryColor
+                                    : (theme.brightness == Brightness.dark ? Colors.white : Colors.black87)),
                           ),
                         ),
                       ),
@@ -673,7 +698,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                             ? Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: isSelected ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade200,
+                                  color: isSelected
+                                      ? Colors.white.withValues(alpha: 0.3)
+                                      : (theme.brightness == Brightness.dark
+                                          ? const Color(0xFF2C323D)
+                                          : Colors.grey.shade200),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -681,7 +710,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.bold,
-                                    color: isSelected ? Colors.white : Colors.black87,
+                                    color: isSelected
+                                        ? Colors.white
+                                        : (theme.brightness == Brightness.dark ? Colors.white : Colors.black87),
                                   ),
                                 ),
                               )
@@ -748,12 +779,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     required List<ScheduleItem> items,
     required bool isDoneSection,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
       decoration: BoxDecoration(
-        color: isDoneSection ? Colors.green.withValues(alpha: 0.04) : Colors.blue.withValues(alpha: 0.04),
+        color: isDoneSection
+            ? Colors.green.withValues(alpha: isDark ? 0.10 : 0.04)
+            : Colors.blue.withValues(alpha: isDark ? 0.10 : 0.04),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: headerColor.withValues(alpha: 0.3),
+          color: headerColor.withValues(alpha: isDark ? 0.45 : 0.3),
           width: 1.5,
         ),
       ),
@@ -853,6 +888,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     final assignedPerson = ScheduleService.instance.getPersonById(item.assignedPersonId);
     final screenWidth = MediaQuery.of(context).size.width;
     final picSize = screenWidth < 360 ? 46.0 : (screenWidth < 600 ? 54.0 : 62.0);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -864,7 +900,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           width: isDoneSection ? 1.5 : 1.2,
         ),
       ),
-      color: isDoneSection ? Colors.green.withValues(alpha: 0.06) : Colors.white,
+      color: isDoneSection
+          ? Colors.green.withValues(alpha: isDark ? 0.14 : 0.06)
+          : Theme.of(context).cardColor,
       child: InkWell(
         onTap: () {
           if (!isDoneSection) {
@@ -899,7 +937,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
                         decoration: isDoneSection ? TextDecoration.lineThrough : null,
-                        color: isDoneSection ? Colors.grey.shade600 : Colors.black87,
+                        color: isDoneSection
+                            ? (isDark ? Colors.grey.shade400 : Colors.grey.shade600)
+                            : (isDark ? Colors.white : Colors.black87),
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,

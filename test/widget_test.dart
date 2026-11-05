@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:daily_schedule/main.dart';
@@ -7,12 +8,27 @@ import 'package:daily_schedule/models/schedule_model.dart';
 import 'package:daily_schedule/screens/schedule_screen.dart';
 import 'package:daily_schedule/screens/person_management_screen.dart';
 import 'package:daily_schedule/screens/edit_schedule_screen.dart';
+import 'package:daily_schedule/screens/settings_screen.dart';
 import 'package:daily_schedule/services/schedule_service.dart';
+import 'package:daily_schedule/services/settings_service.dart';
 
 void main() {
   setUp(() async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      const MethodChannel('flutter_tts'),
+      (MethodCall call) async {
+        if (call.method == 'getVoices') {
+          return [
+            {'name': 'English Voice 1', 'locale': 'en-US'},
+            {'name': 'English Voice 2', 'locale': 'en-GB'},
+          ];
+        }
+        return 1;
+      },
+    );
     SharedPreferences.setMockInitialValues({});
     await ScheduleService.instance.init();
+    await SettingsService.instance.init();
   });
 
   testWidgets('DailyScheduleApp boots to front page showing kid profiles and navigates to kid schedule',
@@ -290,5 +306,107 @@ void main() {
 
     // Verify NO other person chips are present
     expect(find.text('All / Shared'), findsNothing);
+  });
+
+  testWidgets('SettingsService manages theme mode and speech speed settings with persistence',
+      (WidgetTester tester) async {
+    // 1. Initial defaults
+    expect(SettingsService.instance.speechRate, 0.65);
+    expect(SettingsService.instance.pitch, 1.05);
+
+    // 2. Adjust speech rate (faster)
+    await SettingsService.instance.setSpeechRate(0.85);
+    expect(SettingsService.instance.speechRate, 0.85);
+
+    // 3. Adjust pitch
+    await SettingsService.instance.setPitch(1.20);
+    expect(SettingsService.instance.pitch, 1.20);
+
+    // 4. Change theme to Dark
+    await SettingsService.instance.setThemeMode(ThemeMode.dark);
+    expect(SettingsService.instance.themeMode, ThemeMode.dark);
+
+    // 5. Change theme to Light
+    await SettingsService.instance.setThemeMode(ThemeMode.light);
+    expect(SettingsService.instance.themeMode, ThemeMode.light);
+
+    // 6. Reset audio defaults
+    await SettingsService.instance.resetAudioDefaults();
+    expect(SettingsService.instance.speechRate, 0.65);
+    expect(SettingsService.instance.pitch, 1.05);
+  });
+
+  testWidgets('SettingsScreen renders theme options and audio controls and updates settings',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: SettingsScreen(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify sections
+    expect(find.text('Settings & Preferences'), findsOneWidget);
+    expect(find.text('Appearance'), findsOneWidget);
+    expect(find.text('Light Mode'), findsOneWidget);
+    expect(find.text('Dark Mode'), findsOneWidget);
+    expect(find.text('System Default'), findsOneWidget);
+    expect(find.text('Audio & Speech (TTS)'), findsOneWidget);
+    expect(find.text('Speech Speed'), findsOneWidget);
+    expect(find.text('Device Voice'), findsOneWidget);
+    expect(find.text('Test Audio 🔊'), findsOneWidget);
+
+    // Select Dark Mode tile
+    await tester.tap(find.text('Dark Mode'));
+    await tester.pumpAndSettle();
+    expect(SettingsService.instance.themeMode, ThemeMode.dark);
+
+    // Test Audio button
+    await tester.tap(find.text('Test Audio 🔊'));
+    await tester.pump();
+  });
+
+  testWidgets('UserSelectionScreen AppBar allows quick theme toggle and opening SettingsScreen',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(900, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    await SettingsService.instance.setThemeMode(ThemeMode.light);
+
+    await tester.pumpWidget(const DailyScheduleApp());
+    await tester.pumpAndSettle();
+
+    // Check quick theme toggle tooltip
+    final themeToggleFinder = find.byTooltip('Switch to Dark Mode');
+    expect(themeToggleFinder, findsOneWidget);
+
+    // Tap quick theme toggle
+    await tester.tap(themeToggleFinder);
+    await tester.pumpAndSettle();
+
+    // Theme should now be Dark
+    expect(SettingsService.instance.themeMode, ThemeMode.dark);
+    expect(find.byTooltip('Switch to Light Mode'), findsOneWidget);
+
+    // Tap Settings button
+    final settingsButtonFinder = find.byTooltip('Audio & Theme Settings');
+    expect(settingsButtonFinder, findsOneWidget);
+    await tester.tap(settingsButtonFinder);
+    await tester.pumpAndSettle();
+
+    // Now on SettingsScreen
+    expect(find.text('Settings & Preferences'), findsOneWidget);
+    expect(find.text('Speech Speed'), findsOneWidget);
   });
 }
