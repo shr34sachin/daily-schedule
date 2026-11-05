@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/person_model.dart';
 import '../services/schedule_service.dart';
+import '../utils/image_utils.dart';
 
 class PersonManagementScreen extends StatefulWidget {
   const PersonManagementScreen({super.key});
@@ -35,6 +36,7 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
     final roleController = TextEditingController(text: personToEdit?.role ?? 'Student');
     int selectedColor = personToEdit?.colorValue ?? _colorPalette.first;
     String selectedEmoji = personToEdit?.avatarEmoji ?? _emojiPalette.first;
+    String customImageBase64 = personToEdit?.customImageBase64 ?? '';
 
     showModalBottomSheet(
       context: context,
@@ -67,6 +69,95 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
                   const Divider(),
                   const SizedBox(height: 10),
 
+                  // Character Photo Upload & Live Avatar Preview
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Color(selectedColor).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Color(selectedColor).withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      children: [
+                        ImageUtils.buildPersonAvatar(
+                          Person(
+                            id: 'preview',
+                            name: nameController.text.isEmpty ? 'Kid' : nameController.text,
+                            colorValue: selectedColor,
+                            role: 'Child',
+                            avatarEmoji: selectedEmoji,
+                            customImageBase64: customImageBase64,
+                          ),
+                          size: 58,
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                customImageBase64.isNotEmpty ? 'Custom Photo Uploaded' : 'Emoji Avatar Active',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                customImageBase64.isNotEmpty
+                                    ? 'Tap below to change or switch back.'
+                                    : 'Upload a picture of the child / character!',
+                                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                              ),
+                              const SizedBox(height: 8),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: () async {
+                                      final base64 = await ImageUtils.pickImageAsBase64(context);
+                                      if (base64 != null) {
+                                        setModalState(() {
+                                          customImageBase64 = base64;
+                                        });
+                                      }
+                                    },
+                                    icon: const Icon(Icons.add_a_photo, size: 16),
+                                    label: Text(
+                                      customImageBase64.isNotEmpty ? 'Change Photo' : 'Upload Photo',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      backgroundColor: Color(selectedColor),
+                                      foregroundColor: Colors.white,
+                                      minimumSize: Size.zero,
+                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                  if (customImageBase64.isNotEmpty)
+                                    OutlinedButton.icon(
+                                      onPressed: () {
+                                        setModalState(() {
+                                          customImageBase64 = '';
+                                        });
+                                      },
+                                      icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                                      label: const Text('Use Emoji', style: TextStyle(fontSize: 12, color: Colors.redAccent)),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
                   // Name Field
                   TextField(
                     controller: nameController,
@@ -77,6 +168,7 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
                       prefixIcon: const Icon(Icons.badge_outlined),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     ),
+                    onChanged: (_) => setModalState(() {}),
                   ),
                   const SizedBox(height: 14),
 
@@ -93,7 +185,7 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
                   const SizedBox(height: 16),
 
                   // Avatar Emoji Selection
-                  const Text('Choose Avatar:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  const Text('Or Choose Avatar Emoji:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -175,6 +267,7 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
                             role: roleController.text.trim().isEmpty ? 'Member' : roleController.text.trim(),
                             colorValue: selectedColor,
                             avatarEmoji: selectedEmoji,
+                            customImageBase64: customImageBase64,
                           ));
                         } else {
                           await ScheduleService.instance.addPerson(Person(
@@ -183,6 +276,7 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
                             role: roleController.text.trim().isEmpty ? 'Member' : roleController.text.trim(),
                             colorValue: selectedColor,
                             avatarEmoji: selectedEmoji,
+                            customImageBase64: customImageBase64,
                           ));
                         }
 
@@ -356,18 +450,7 @@ class _PersonManagementScreenState extends State<PersonManagementScreen> {
                             elevation: isSelected ? 2 : 0.8,
                             child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                              leading: Container(
-                                width: 48,
-                                height: 48,
-                                decoration: BoxDecoration(
-                                  color: person.color.withValues(alpha: 0.18),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: person.color, width: 2),
-                                ),
-                                child: Center(
-                                  child: Text(person.avatarEmoji, style: const TextStyle(fontSize: 24)),
-                                ),
-                              ),
+                              leading: ImageUtils.buildPersonAvatar(person, size: 48),
                               title: Row(
                                 children: [
                                   Text(

@@ -50,6 +50,10 @@ void main() {
     expect(find.text('DONE'), findsOneWidget);
     expect(find.text('Switch Kid'), findsOneWidget);
 
+    // In each character's schedule, ensure there is NO list of the other people
+    expect(find.text('All / Shared'), findsNothing);
+    expect(find.text('+ Manage'), findsNothing);
+
     // Tap "Switch Kid" to return to the front page
     await tester.tap(find.text('Switch Kid'));
     await tester.pumpAndSettle();
@@ -223,5 +227,68 @@ void main() {
     expect(find.text("Edit Alex's Monday"), findsOneWidget);
     expect(find.text('Add Activity'), findsOneWidget);
     expect(find.text('Save Schedule'), findsOneWidget);
+  });
+
+  testWidgets('Renders custom uploaded photos for both person avatar and schedule activity',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    const sampleBase64 =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+
+    // 1. Add person with custom photo
+    final customPerson = const Person(
+      id: 'person_photo_test',
+      name: 'Oliver',
+      colorValue: 0xFF00796B,
+      role: 'Super Kid',
+      avatarEmoji: '🦸',
+      customImageBase64: sampleBase64,
+    );
+    await ScheduleService.instance.addPerson(customPerson);
+
+    // 2. Add an activity with custom photo for Oliver
+    final now = DateTime.now();
+    final currentDay = now.weekday == 7 ? 0 : now.weekday;
+    await ScheduleService.instance.savePersonDaySchedule(
+      'person_photo_test',
+      currentDay,
+      [
+        ScheduleItem(
+          id: 'oliver_origami',
+          title: 'Origami Craft',
+          time: '',
+          iconCodePoint: 58544,
+          assignedPersonId: 'person_photo_test',
+          isCompleted: false,
+          customImageBase64: sampleBase64,
+        ),
+      ],
+    );
+
+    // 3. Pump ScheduleScreen for Oliver
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ScheduleScreen(initialPersonId: 'person_photo_test'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Verify Oliver's Routine title
+    expect(find.text("Oliver's Routine"), findsOneWidget);
+
+    // Verify activity title
+    expect(find.text('Origami Craft'), findsOneWidget);
+
+    // Verify Image.memory widgets are present (both Oliver's avatar and Origami's picture)
+    expect(find.byType(Image), findsWidgets);
+
+    // Verify NO other person chips are present
+    expect(find.text('All / Shared'), findsNothing);
   });
 }

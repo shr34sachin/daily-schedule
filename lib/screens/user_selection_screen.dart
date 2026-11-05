@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import '../models/person_model.dart';
 import '../models/schedule_model.dart';
 import '../services/schedule_service.dart';
+import '../utils/image_utils.dart';
 import 'schedule_screen.dart';
 import 'person_management_screen.dart';
 import 'edit_schedule_screen.dart';
@@ -75,6 +77,7 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
     final roleController = TextEditingController(text: 'Kid');
     int selectedColor = 0xFF1976D2;
     String selectedEmoji = '👧';
+    String customPhotoBase64 = '';
 
     final colors = [
       0xFF9C27B0, // Purple
@@ -129,15 +132,77 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
-                  const Text('Choose Avatar:', style: TextStyle(fontWeight: FontWeight.bold)),
+
+                  // Character Photo Upload Section
+                  const Text('Character Photo / Picture:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  if (customPhotoBase64.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        Container(
+                          width: 62,
+                          height: 62,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Color(selectedColor), width: 2.5),
+                          ),
+                          child: ClipOval(
+                            child: Image.memory(
+                              base64Decode(customPhotoBase64),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final base64 = await ImageUtils.pickImageAsBase64(context);
+                            if (base64 != null) {
+                              setModalState(() => customPhotoBase64 = base64);
+                            }
+                          },
+                          icon: const Icon(Icons.photo_camera, size: 18),
+                          label: const Text('Change Photo'),
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton(
+                          onPressed: () => setModalState(() => customPhotoBase64 = ''),
+                          child: const Text('Remove', style: TextStyle(color: Colors.redAccent)),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final base64 = await ImageUtils.pickImageAsBase64(context);
+                        if (base64 != null) {
+                          setModalState(() => customPhotoBase64 = base64);
+                        }
+                      },
+                      icon: const Icon(Icons.add_a_photo_rounded, size: 20),
+                      label: const Text('Upload Photo for Kid'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+
+                  const Text('Or Choose Avatar Emoji:', style: TextStyle(fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: emojis.map((emoji) {
-                      final isSelected = selectedEmoji == emoji;
+                      final isSelected = customPhotoBase64.isEmpty && selectedEmoji == emoji;
                       return InkWell(
-                        onTap: () => setModalState(() => selectedEmoji = emoji),
+                        onTap: () {
+                          setModalState(() {
+                            selectedEmoji = emoji;
+                            customPhotoBase64 = ''; // Clears photo when selecting emoji
+                          });
+                        },
                         borderRadius: BorderRadius.circular(12),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -194,6 +259,7 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
                           colorValue: selectedColor,
                           role: roleController.text.trim().isEmpty ? 'Kid' : roleController.text.trim(),
                           avatarEmoji: selectedEmoji,
+                          customImageBase64: customPhotoBase64,
                         );
                         await ScheduleService.instance.addPerson(newKid);
                         if (context.mounted) Navigator.pop(ctx);
@@ -505,31 +571,10 @@ class _UserSelectionScreenState extends State<UserSelectionScreen> {
     return Stack(
       alignment: Alignment.center,
       children: [
-        Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            gradient: RadialGradient(
-              colors: [
-                kid.color.withValues(alpha: 0.3),
-                kid.color.withValues(alpha: 0.1),
-              ],
-            ),
-            border: Border.all(color: kid.color, width: 2.5),
-            boxShadow: [
-              BoxShadow(
-                color: kid.color.withValues(alpha: 0.25),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
-              ),
-            ],
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            kid.avatarEmoji,
-            style: TextStyle(fontSize: size * 0.52),
-          ),
+        ImageUtils.buildPersonAvatar(
+          kid,
+          size: size,
+          border: Border.all(color: kid.color, width: 2.5),
         ),
         if (isAllDone)
           Positioned(

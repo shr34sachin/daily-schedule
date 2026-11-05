@@ -3,6 +3,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import '../models/person_model.dart';
 import '../models/schedule_model.dart';
 import '../services/schedule_service.dart';
+import '../utils/image_utils.dart';
 import 'edit_schedule_screen.dart';
 import 'person_management_screen.dart';
 import 'user_selection_screen.dart';
@@ -113,13 +114,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: presetColor.withValues(alpha: 0.18),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(item.icon, size: 50, color: presetColor),
+                ImageUtils.buildActivityPicture(
+                  item,
+                  size: 110,
+                  color: presetColor,
+                  borderRadius: 18,
                 ),
                 const SizedBox(height: 14),
                 Text(
@@ -384,7 +383,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (activePerson != null) ...[
-                  Text(activePerson.avatarEmoji, style: const TextStyle(fontSize: 22)),
+                  ImageUtils.buildPersonAvatar(activePerson, size: 32, showGlow: false),
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
@@ -481,16 +480,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               constraints: const BoxConstraints(maxWidth: 950),
               child: Column(
                 children: [
-                  // 1. PERSON SELECTOR CHIP BAR
-                  _buildPersonSelectorBar(),
-
-                  // 2. TIME OF DAY GREETING BANNER
+                  // 1. TIME OF DAY GREETING BANNER
                   _buildTimeOfDayBanner(greetingInfo, isToday, now, activePerson),
 
-                  // 3. 7-DAY SELECTOR STRIP
+                  // 2. 7-DAY SELECTOR STRIP
                   _buildDaySelectorStrip(theme, now),
 
-                  // 4. TWO-COLUMN (TO DO & DONE) SCHEDULE BOARD
+                  // 3. TWO-COLUMN (TO DO & DONE) SCHEDULE BOARD
                   Expanded(
                     child: daySchedule.items.isEmpty
                         ? _buildEmptyScheduleView(daySchedule, activePerson)
@@ -525,73 +521,6 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
         );
       },
-    );
-  }
-
-  // Person Selector Horizontal Chip Bar
-  Widget _buildPersonSelectorBar() {
-    final persons = ScheduleService.instance.persons;
-    final activeId = ScheduleService.instance.activePersonId;
-
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: Theme.of(context).colorScheme.surface,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        children: [
-          // "All / Shared" Filter Chip
-          Padding(
-            padding: const EdgeInsets.only(right: 6.0),
-            child: FilterChip(
-              avatar: const Icon(Icons.groups, size: 16),
-              label: const Text('All / Shared'),
-              selected: activeId == null,
-              onSelected: (val) {
-                if (val) ScheduleService.instance.setActivePerson(null);
-              },
-            ),
-          ),
-
-          // Individual Person Chips
-          ...persons.map((person) {
-            final isSelected = activeId == person.id;
-            return Padding(
-              padding: const EdgeInsets.only(right: 6.0),
-              child: FilterChip(
-                avatar: Text(person.avatarEmoji, style: const TextStyle(fontSize: 14)),
-                label: Text(person.name),
-                selected: isSelected,
-                selectedColor: person.color.withValues(alpha: 0.25),
-                checkmarkColor: person.color,
-                labelStyle: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: isSelected ? person.color : Colors.black87,
-                ),
-                side: BorderSide(
-                  color: isSelected ? person.color : Colors.grey.shade300,
-                  width: isSelected ? 1.8 : 1.0,
-                ),
-                onSelected: (val) {
-                  ScheduleService.instance.setActivePerson(val ? person.id : null);
-                },
-              ),
-            );
-          }),
-
-          // Manage Persons Button Chip
-          ActionChip(
-            avatar: const Icon(Icons.person_add_alt_1, size: 16),
-            label: const Text('+ Manage'),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const PersonManagementScreen()),
-              );
-            },
-          ),
-        ],
-      ),
     );
   }
 
@@ -922,6 +851,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Widget _buildScheduleItemCard(ScheduleItem item, bool isDoneSection) {
     final presetColor = SchedulePresets.getColorForLabel(item.title);
     final assignedPerson = ScheduleService.instance.getPersonById(item.assignedPersonId);
+    final screenWidth = MediaQuery.of(context).size.width;
+    final picSize = screenWidth < 360 ? 46.0 : (screenWidth < 600 ? 54.0 : 62.0);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -947,21 +878,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 8.0),
           child: Row(
             children: [
-              // Circular Icon
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: isDoneSection
-                      ? Colors.green.withValues(alpha: 0.18)
-                      : presetColor.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  item.icon,
-                  size: 20,
-                  color: isDoneSection ? Colors.green.shade700 : presetColor,
-                ),
+              // Picture / Icon for Activity (Comfortably visible)
+              ImageUtils.buildActivityPicture(
+                item,
+                size: picSize,
+                color: presetColor,
+                borderRadius: 12,
+                isCompleted: isDoneSection,
               ),
               const SizedBox(width: 8),
 
@@ -1000,7 +923,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Text(assignedPerson.avatarEmoji, style: const TextStyle(fontSize: 10)),
+                                  ImageUtils.buildPersonAvatar(assignedPerson, size: 14, showGlow: false),
                                   const SizedBox(width: 3),
                                   Text(
                                     assignedPerson.name,

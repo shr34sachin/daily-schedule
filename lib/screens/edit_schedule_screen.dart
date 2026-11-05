@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/schedule_model.dart';
 import '../services/schedule_service.dart';
+import '../utils/image_utils.dart';
 
 class EditScheduleScreen extends StatefulWidget {
   final int initialDayOfWeek;
@@ -89,6 +90,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
     String selectedTitle = itemToEdit?.title ?? SchedulePresets.all.first.label;
     bool hasTime = itemToEdit != null && itemToEdit.time.isNotEmpty;
     TimeOfDay selectedTime = TimeOfDay.now();
+    String customImageBase64 = itemToEdit?.customImageBase64 ?? '';
 
     if (itemToEdit != null && itemToEdit.time.isNotEmpty) {
       final parts = itemToEdit.time.split(' ');
@@ -121,6 +123,10 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
             final screenWidth = MediaQuery.of(context).size.width;
             final crossAxisCount = screenWidth > 700 ? 5 : (screenWidth > 500 ? 4 : 3);
             final currentPerson = ScheduleService.instance.getPersonById(_selectedPersonId);
+            final currentTitle = isCustom && customTitleController.text.trim().isNotEmpty
+                ? customTitleController.text.trim()
+                : selectedTitle;
+            final currentPresetColor = SchedulePresets.getColorForLabel(currentTitle);
 
             return Padding(
               padding: EdgeInsets.only(
@@ -147,6 +153,96 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                       ],
                     ),
                     const Divider(),
+
+                    // Activity Picture Section (Custom Photo or Preset Icon)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: currentPresetColor.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: currentPresetColor.withValues(alpha: 0.28)),
+                      ),
+                      child: Row(
+                        children: [
+                          ImageUtils.buildActivityPicture(
+                            ScheduleItem(
+                              id: 'preview',
+                              title: currentTitle,
+                              time: '',
+                              iconCodePoint: SchedulePresets.getIconForLabel(currentTitle).codePoint,
+                              customImageBase64: customImageBase64,
+                            ),
+                            size: 60,
+                            color: currentPresetColor,
+                            borderRadius: 14,
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  customImageBase64.isNotEmpty ? 'Custom Activity Picture' : 'Preset Icon Active',
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  customImageBase64.isNotEmpty
+                                      ? 'Photo is displayed prominently on the kid\'s board.'
+                                      : 'Add a photo (e.g. kid\'s toy, toothbrush, book) for this activity!',
+                                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                                ),
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 6,
+                                  children: [
+                                    ElevatedButton.icon(
+                                      onPressed: () async {
+                                        final base64 = await ImageUtils.pickImageAsBase64(context);
+                                        if (base64 != null) {
+                                          setModalState(() {
+                                            customImageBase64 = base64;
+                                          });
+                                        }
+                                      },
+                                      icon: const Icon(Icons.add_a_photo, size: 16),
+                                      label: Text(
+                                        customImageBase64.isNotEmpty ? 'Change Photo' : 'Upload Photo',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                      style: ElevatedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                        backgroundColor: currentPresetColor,
+                                        foregroundColor: Colors.white,
+                                        minimumSize: Size.zero,
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                    ),
+                                    if (customImageBase64.isNotEmpty)
+                                      OutlinedButton.icon(
+                                        onPressed: () {
+                                          setModalState(() {
+                                            customImageBase64 = '';
+                                          });
+                                        },
+                                        icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
+                                        label: const Text('Use Preset Icon', style: TextStyle(fontSize: 12, color: Colors.redAccent)),
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          minimumSize: Size.zero,
+                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
 
                     // Choose Preset Grid
                     const Text('Choose Activity Preset:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
@@ -337,6 +433,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                                   notes: notesController.text.trim(),
                                   assignedPersonId: _selectedPersonId,
                                   isCompleted: false,
+                                  customImageBase64: customImageBase64,
                                 ),
                               );
                             });
@@ -348,6 +445,7 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                               itemToEdit.iconCodePoint = SchedulePresets.getIconForLabel(titleToUse).codePoint;
                               itemToEdit.notes = notesController.text.trim();
                               itemToEdit.assignedPersonId = _selectedPersonId;
+                              itemToEdit.customImageBase64 = customImageBase64;
                             });
                           }
                           Navigator.pop(ctx);
@@ -510,8 +608,8 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (currentPerson != null) ...[
-              Text(currentPerson.avatarEmoji, style: const TextStyle(fontSize: 20)),
-              const SizedBox(width: 6),
+              ImageUtils.buildPersonAvatar(currentPerson, size: 28, showGlow: false),
+              const SizedBox(width: 8),
             ],
             Flexible(
               child: Text(
@@ -658,14 +756,11 @@ class _EditScheduleScreenState extends State<EditScheduleScreen> {
                               side: BorderSide(color: presetColor.withValues(alpha: 0.35)),
                             ),
                             child: ListTile(
-                              leading: Container(
-                                width: 38,
-                                height: 38,
-                                decoration: BoxDecoration(
-                                  color: presetColor.withValues(alpha: 0.15),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(item.icon, color: presetColor, size: 22),
+                              leading: ImageUtils.buildActivityPicture(
+                                item,
+                                size: 48,
+                                color: presetColor,
+                                borderRadius: 10,
                               ),
                               title: Text(
                                 item.title,
